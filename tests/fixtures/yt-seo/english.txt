@@ -1,0 +1,17 @@
+Build your first app with Claude Code in 15 minutes, no coding background needed.
+Missed part one? Watch it here: https://youtu.be/abc123XYZ00?list=PLexample123
+
+What you will learn:
+• Installing Claude Code on Mac and Windows
+• Your first project from one prompt
+• How it fixes its own errors
+• Three mistakes every beginner makes
+
+00:00 Why Claude Code
+01:10 Install in two minutes
+04:30 First project
+12:00 Wrap-up
+
+What will you build first? Tell me in the comments.
+
+#ClaudeCode #AI #coding

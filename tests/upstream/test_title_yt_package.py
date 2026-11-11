@@ -71,7 +71,10 @@ class TitleTests(unittest.TestCase):
         self.assertNotIn("no-number", kinds(r))
         r = self.t.check("Elon Musk Fired Twitter's Board")
         msg = dict(r["issues"]).get("no-number", "")
-        self.assertIn("names are not detected", msg)
+        # Changed on purpose (Farsi pack): messages are Persian now. Title Case English names are
+        # still not detected, and the message still says so («... تشخیص نمی‌دهم، دستی چک کن»).
+        self.assertIn("Title Case", msg)
+        self.assertIn("دستی چک کن", msg)
         self.assertIn("no-number", kinds(self.t.check("You may like this one")))
 
     # bug 5: UTF-8 BOM is stripped from the first title
@@ -87,9 +90,11 @@ class TitleTests(unittest.TestCase):
     def test_mobile_preview_keeps_full_word(self):
         r = self.t.check("abcdefghi abcdefghi abcdefghi abcdefghij more 5")
         msg = dict(r["issues"])["mobile"]
-        self.assertIn('"abcdefghi abcdefghi abcdefghi abcdefghij..."', msg)
+        # Changed on purpose (Farsi pack): the preview is quoted with Persian guillemets and an
+        # ellipsis character («...…») instead of "...". The off-by-one fix itself is unchanged.
+        self.assertIn('«abcdefghi abcdefghi abcdefghi abcdefghij…»', msg)
         r = self.t.check("abcdefghi abcdefghi abcdefghi abcdefghijkl more 5")
-        self.assertIn('"abcdefghi abcdefghi abcdefghi..."', dict(r["issues"])["mobile"])
+        self.assertIn('«abcdefghi abcdefghi abcdefghi…»', dict(r["issues"])["mobile"])
 
     # bug 7: hyphenated vague words are flagged, without losing hyphen-split matches
     def test_hyphenated_vague(self):
@@ -107,7 +112,8 @@ class TitleTests(unittest.TestCase):
     def test_missing_file_reports_not_found(self):
         p = run(os.path.join(self.tmp.name, "nope.txt"))
         self.assertEqual(p.returncode, 1)
-        self.assertIn("file not found", p.stderr)
+        # Changed on purpose (Farsi pack): the error message is Persian now.
+        self.assertIn("فایل پیدا نشد", p.stderr)
 
     def test_basic_cli_unchanged(self):
         p = run("--title", "I tried 30 days of cold showers", "--thumb", "NEVER AGAIN", "--json")

@@ -146,8 +146,10 @@ class ChaptersTest(unittest.TestCase):
         write_srt(p, three_sections())
         r = self.run_tool(p, "--target", "3")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("3 chapters", r.stdout)
-        self.assertNotIn("INVALID", r.stdout)
+        # Intentional change (Farsi pack): text output is Persian now, so "3 chapters" became
+        # "۳ فصل" and the "INVALID" warning became «نامعتبر». Same check, translated labels.
+        self.assertIn("۳ فصل", r.stdout)
+        self.assertNotIn("نامعتبر", r.stdout)
 
 
 if __name__ == "__main__":

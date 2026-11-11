@@ -1,15 +1,15 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "youtube-agent-skill",
-  "description": "The YouTube agent skill pack for Claude",
-  "owner": { "name": "Jake Schincariol", "url": "https://opusjake.ai" },
+  "name": "youtube-skills-farsi",
+  "description": "مهارت‌های فارسی یوتیوب و اینستاگرام برای Claude",
+  "owner": { "name": "DrMounesi", "url": "https://www.youtube.com/@DrMounesi" },
   "plugins": [
     {
-      "name": "youtube-agent",
-      "description": "Eleven Claude skills that run a YouTube channel, including a scored hook panel, a title and thumbnail linter, an edit decision list, a retention reader and a virality engine.",
+      "name": "youtube-farsi",
+      "description": "چهارده مهارت فارسی برای کانال یوتیوب و اینستاگرام: هوک نمره‌دار، عنوان و تامبنیل، فهرست برش برای DaVinci Resolve، ریتنشن، ریلز با کلمه‌ی کامنت، سئو، فصل‌بندی، ثبت نتیجه و زیرنویس فارسی.",
       "source": "./",
       "category": "productivity",
-      "homepage": "https://github.com/Jakeschincariol/youtube-agent-skill"
+      "homepage": "https://github.com/mounesi/youtube-skills-farsi"
     }
   ]
 }

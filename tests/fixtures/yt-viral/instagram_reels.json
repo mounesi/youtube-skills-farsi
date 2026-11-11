@@ -1,0 +1,10 @@
+{"reels": [
+ {"account": "@example.page", "caption": "کامنت کن «آرتیفکت» تا آموزشش رو برات بفرستم\n#هوش_مصنوعی", "plays": "۵۷ هزار"},
+ {"account": "@example.page", "caption": "سه ابزار هوش مصنوعی که وقتت رو نجات می‌ده", "plays": "4.2K"},
+ {"account": "@example.page", "caption": "قبل و بعد از اتوماسیون", "plays": "۳٬۸۰۰"},
+ {"account": "@example.page", "caption": "یه نکته‌ی کوچیک", "plays": 5100},
+ {"ownerUsername": "other.page", "caption": "ریلز اول", "videoPlayCount": 900},
+ {"ownerUsername": "other.page", "caption": "ریلز دوم", "videoPlayCount": 1100},
+ {"ownerUsername": "other.page", "caption": "ریلز سوم", "videoPlayCount": 1000},
+ {"ownerUsername": "other.page", "caption": "ریلز چهارم", "videoPlayCount": 8000, "url": "https://www.instagram.com/reel/EXAMPLE/"}
+]}

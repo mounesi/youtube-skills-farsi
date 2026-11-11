@@ -1,45 +1,120 @@
 ---
 name: yt-retention
 description: >-
-  Read a YouTube Studio audience-retention export and find where viewers
-  actually leave, then say what to change. Use for "why do people stop
-  watching", "my retention is bad", a pasted retention chart or CSV, or "fix
-  my pacing".
+  نمودار ماندگاری مخاطب (ریتنشن) یوتیوب را از خروجی CSV یوتیوب استودیو می‌خواند، با سرستون انگلیسی یا
+  فارسی و رقم فارسی، و می‌گوید بیننده‌ها دقیقاً کجا می‌روند: نشت هوک، پرتگاه یا سرازیری؛ با رونوشت،
+  جمله‌ای را که در لحظه‌ی هر پرتگاه گفته شده نشان می‌دهد، دو ویدیو را مقایسه می‌کند و فقط یک تغییر
+  پیشنهاد می‌دهد. وقتی سازنده می‌نویسد «چرا بیننده‌ها ویدیومو تا آخر نمی‌بینن؟»، «ریتنشنم بده»،
+  «نمودار ماندگاری رو ببین»، «کجای ویدیو ول می‌کنن؟»، «این دو تا ویدیو رو مقایسه کن» یا «ریتم ویدیومو
+  درست کن»، یا یک CSV یا عکس نمودار ماندگاری می‌فرستد، از این مهارت استفاده کن. (English triggers:
+  "why do people stop watching", "my retention is bad", "read my retention graph", "fix my pacing")
 ---
 
 # yt-retention
 
-The retention graph is the only honest feedback YouTube gives you. Almost nobody exports it.
+نمودار ماندگاری مخاطب تنها بازخورد صادقانه‌ای است که یوتیوب به تو می‌دهد، و تقریباً هیچ‌کس آن را دانلود
+نمی‌کند. این مهارت نمودار را می‌خواند، بزرگ‌ترین نشت را نام می‌برد و یک تغییر برای آن پیشنهاد می‌دهد.
+
+این مهارت بر پایه‌ی [youtube-agent-skill](https://github.com/Jakeschincariol/youtube-agent-skill) از Jake
+Schincariol (مجوز MIT) است؛ فارسی‌سازی، خواندن خروجی فارسی Studio، مقایسه‌ی دو ویدیو و قواعد شورت و ریلز
+اضافه شده‌اند.
+
+## دستورها
+
+از داخل پوشه‌ی همین مهارت:
 
 ```bash
-python3 retention.py retention.csv --duration 600
-python3 retention.py retention.csv --duration 600 --transcript transcript.srt
+python3 -I retention.py retention.csv --duration 600
+python3 -I retention.py retention.csv --duration 10:00 --transcript transcript.srt
+python3 -I retention.py retention.csv --duration 600 --compare other.csv --compare-duration 540
+python3 -I retention.py short.csv --kind short
+python3 -I retention.py retention.csv --duration 600 --json
 ```
 
-Pass `--duration SECONDS` whenever the export's x-axis is a percentage (most Studio exports):
-without it the tool cannot turn a percent position into a time, so it cannot line the drops up
-with the `--transcript` cues.
+- `--duration` طول ویدیو به ثانیه (یا `10:00`). در بیشتر خروجی‌های Studio محور افقی **درصد طول ویدیو**
+  است؛ بدون طول، ابزار نمی‌تواند موقعیت را به زمان تبدیل کند و پرتگاه را به جمله‌ی رونوشت وصل کند
+  (در این حالت هشدار می‌دهد).
+- `--transcript` رونوشت SRT، VTT (حتی زیرنویس خودکار یوتیوب) یا JSON ویسپر. جمله‌ی هر پرتگاه و جمله‌های
+  شروع ویدیو را چاپ می‌کند؛ همین است که گزارش را قابل اجرا می‌کند.
+- `--compare other.csv` و `--compare-duration` ویدیوی دوم را کنار اولی می‌گذارد: هوک، پرتگاه‌ها، سرازیری،
+  ماندگاری در ۲۵/۵۰/۷۵ درصد، پایان و میانگین تقریبی، و می‌گوید فاصله بیشتر در کدام بخش است.
+- `--axis pct|seconds` وقتی ابزار نوع محور را حدس زده (در stderr می‌گوید) و حدسش غلط است.
+- `--kind short|long` و `--hook-window` ثانیه: پیش‌فرض از روی طول است (تا ۳ دقیقه = شورت).
+- `--json` همه‌ی عددها برای ابزارهای دیگر.
 
-Getting the file: Studio -> a video -> Analytics -> Engagement -> the audience-retention chart ->
-the download icon -> "Audience retention".
+## ورودی
 
-## Three different problems
+گرفتن فایل: Studio ← ویدیو ← Analytics ← Engagement (تعامل) ← نمودار ماندگاری مخاطب ← آیکن دانلود.
+دو ستون لازم است: موقعیت (درصد، ثانیه یا `m:ss`) و درصد بیننده‌هایی که هنوز نگاه می‌کنند.
 
-- **HOOK LEAK** - what is lost in the first 30 seconds. Under 25% is healthy. This is always the
-  first thing to fix and it is always the first fifteen seconds of script, never the edit.
-- **CLIFFS** - single steep drops. A cliff is a moment: a topic change with no signposting, a
-  sponsor read, a long setup. With `--transcript` the tool prints what was being said there, which
-  is what makes the report actionable instead of interesting.
-- **SLIDE** - the steady bleed across the middle. A flat slide is pacing. The fix is cutting, not
-  rewriting.
+ابزار این‌ها را بدون تنظیم می‌خواند:
 
-## What to hand back
+- سرستون انگلیسی (`Video position (%)`، `Absolute audience retention (%)`) و فارسی («زمان ویدیو»،
+  «موقعیت ویدیو»، «درصد بینندگان»، «ماندگاری مخاطب»). اگر ستون مطلق و نسبی هر دو باشند، مطلق را برمی‌دارد.
+- رقم فارسی و عربی (۰-۹ و ٠-٩)، ٪ و %، ممیز ٫، جداکننده‌ی هزارگان ٬ یا ,، اعشار با ویرگول (`98,5`)،
+  جداکننده‌ی ستون , یا ; یا Tab، فایل UTF-8، UTF-16 یا ویندوز فارسی (cp1256).
+- ماندگاری به شکل ۰ تا ۱ (در ۱۰۰ ضرب می‌شود و ابزار می‌گوید).
 
-Name the single biggest leak and one change for it. Not a list of five. Then, only if asked, the
-rest. And if the hook leak is healthy and the slide is flat, say the video is fine and the problem
-is packaging - send them to `/yt-package`.
+اگر کاربر فقط عکس نمودار فرستاد، عددها را از روی عکس حدس نزن؛ فایل CSV را بخواه. اگر رونوشت ندارد،
+بگو با `whisper` یا زیرنویس خودکار یک آپلود Unlisted بسازد (برای فارسی، یوتیوب معمولاً زیرنویس خودکار
+نمی‌سازد؛ ویسپر را پیشنهاد بده).
 
-## The gate
+## سه مشکل جدا
 
-Nothing here publishes. This skill writes and you publish. Every output ends in a block the user
-copies, and the last line of every run is the question: **ship it, or change it?**
+- **نشت هوک**: آنچه در شروع از دست رفت. در ویدیوی بلند ۳۰ ثانیه‌ی اول؛ زیر ۲۵٪ سالم است
+  (*قاعده‌ی سرانگشتی از پک اصلی، نه عدد رسمی یوتیوب*). همیشه اول این را درست کن، و راه‌حلش همیشه
+  ۱۵ ثانیه‌ی اول اسکریپت است، نه تدوین ← `/yt-script`.
+- **پرتگاه**: افت تند در یک لحظه‌ی مشخص (بیش از ۰٫۸ واحد درصد بین دو نقطه، بعد از بازه‌ی هوک).
+  پرتگاه یک لحظه است: عوض شدن موضوع بی‌خبر، تبلیغ اسپانسر، مقدمه‌چینی طولانی. با `--transcript` ابزار
+  می‌گوید آنجا چه گفته شده.
+- **سرازیری**: ریزش آرام و یکنواخت بخش میانی، بدون پرتگاه‌ها، به واحد درصد در دقیقه. سرازیری یعنی ریتم
+  کند است؛ راه‌حلش کوتاه کردن است، نه بازنویسی ← `/yt-edit`.
+
+ابزار هر سه را به «واحد درصدی که از دست رفت» می‌شمارد و بزرگ‌ترین را «بزرگ‌ترین نشت» می‌نامد؛ این
+مقایسه فقط از عددهای خود فایل است. جاهایی که منحنی بالا می‌رود (بازپخش، عقب زدن، لوپ شورت) جدا با
+عنوان «برگشت‌ها» نشان داده می‌شوند و در سرازیری حساب نمی‌شوند. «میانگین تقریبی منحنی» از روی نمودار
+محاسبه می‌شود؛ عدد رسمی را از «Average percentage viewed» در Studio بردار.
+
+## شورت، ریلز و اینستاگرام
+
+- **شورت و ریلز (تا ۳ دقیقه)** در ۱ تا ۳ ثانیه‌ی اول قضاوت می‌شوند؛ ابزار برای آن‌ها بازه‌ی هوک را
+  ۳ ثانیه می‌گیرد. برای شورت آستانه‌ی رسمی «سالم» وجود ندارد: با شورت‌های قبلی خودت مقایسه کن
+  (`--compare`) و در Studio عدد «Viewed vs. swiped away» را هم ببین. منحنی شورت می‌تواند به خاطر لوپ
+  از ۱۰۰٪ بالاتر برود؛ این خطا نیست.
+- **تجربه‌ی کانال DrMounesi**: فریم صفر همان هوک است (متن روی صفحه + تصویر)، هر ۲ تا ۴ ثانیه یک تصویر
+  تازه، و هر گرافیک دقیقاً روی کلمه‌ی گفته‌شده‌اش. اگر نشت هوک شورت بزرگ است، اول این‌ها را چک کن ← `/yt-reel`.
+- **اینستاگرام** خروجی منحنی ماندگاری ندارد. از Insights ریلز «میانگین زمان تماشا» (Average watch time)
+  و «نرخ رد شدن» (Skip rate) را بخواه، عددها را از خود کاربر بگیر و حدس نزن؛ این ابزار روی آن‌ها اجرا
+  نمی‌شود. نرخ رد شدن بالا = همان نشت هوک (فریم صفر)؛ میانگین زمان تماشای کوتاه نسبت به طول ریلز =
+  سرازیری یا پرتگاه. برای ثبت عددها در ۲۴ ساعت و ۷ روز ← `/yt-results`.
+
+## پیش از جواب
+
+اگر `~/.claude/youtube/voice.md` هست بخوانش و پیشنهادها (مثلاً بازنویسی هوک) را با لحن خود سازنده
+بنویس. اگر نیست، الگوی فارسی‌اش در `templates/voice.md` است. هیچ عدد، نتیجه یا منبعی نساز: هر عددی که
+می‌گویی یا از خروجی ابزار است یا از خود کاربر.
+
+## چه چیزی تحویل بدهی
+
+1. **بزرگ‌ترین نشت** با عددش و **یک تغییر** برای آن، نه فهرست پنج‌تایی. بقیه را فقط اگر خواست.
+2. اگر پرتگاه است: زمانش و جمله‌ی رونوشت در همان لحظه، با پیشنهاد مشخص (جمله‌ی راهنما قبلش، کوتاه کردن
+   یا جابه‌جایی آن تکه).
+3. اگر هوک سالم است، پرتگاه بزرگی نیست و سرازیری ناچیز است (ابزار می‌گوید «خود ویدیو مشکلی ندارد»)،
+   بگو ویدیو سالم است و مشکل بسته‌بندی است ← `/yt-package`.
+4. در مقایسه: بخشی که فاصله‌ی دو ویدیو بیشتر از همه در آن است و اینکه از کدام ویدیو چه چیزی یاد بگیرد.
+
+## قواعد
+
+- عدد را از خروجی ابزار بخوان، نه از چشم روی نمودار. اگر ابزار گفت محور را حدس زده، از کاربر طول ویدیو
+  را بپرس و دوباره با `--duration` اجرا کن.
+- آستانه‌ها برچسب دارند: ۲۵٪ هوک و ۰٫۸ واحد پرتگاه از پک اصلی‌اند؛ «پرتگاه بزرگ» از ۳ واحد و «سرازیری
+  ناچیز» تا ۱ واحد در دقیقه قاعده‌ی سرانگشتی همین ابزارند؛ ۱ تا ۳ ثانیه‌ی شورت و ریلز رفتار رسمی خود
+  پلتفرم‌ها در شمردن «دیده شد / رد شد» است. هیچ‌کدام را عدد رسمی یوتیوب جا نزن.
+- ویدیوی بلند را با شورت مقایسه نکن (ابزار هشدار می‌دهد).
+
+## دروازه
+
+هیچ چیزی از اینجا منتشر نمی‌شود. این مهارت می‌نویسد و تو منتشر می‌کنی. هر خروجی با یک بلوک قابل کپی
+تمام می‌شود و آخرین خط هر اجرا این سؤال است:
+
+**منتشرش کنیم یا تغییرش بدیم؟**

@@ -1,49 +1,111 @@
 ---
 name: yt-package
 description: >-
-  Write and lint the title and thumbnail for a YouTube video as one pairing,
-  checking truncation, duplication and vagueness before publish. Use for
-  "title ideas", "what should I call this", "thumbnail text", "my CTR is
-  bad", packaging, or any request to rename or repackage an existing video.
+  عنوان و متن تامبنیل ویدیوی یوتیوب را با هم، به‌عنوان یک جفت، می‌نویسد و قبل از انتشار چک
+  می‌کند: کلیدواژه اول عنوان، ۶ تا ۷ کلمه، زیر ۶۰ تا ۷۰ نویسه، برند و «قسمت N» آخر، عدد/اسم/تاریخ،
+  کلمه‌های مبهم، تکرار نشدن عنوان روی تامبنیل، و ترجمه‌ی برگشتی به انگلیسی. وقتی به کار می‌آید که
+  سازنده بنویسد «اسم ویدیو چی بذارم؟»، «عنوان بنویس»، «تایتل بده»، «متن تامبنیل»، «تامبنیلم چی
+  بنویسم؟»، «کلیک نمی‌خوره»، «CTR پایینه»، «این ویدیو رو دوباره بسته‌بندی کن» یا هر درخواستی برای
+  عوض کردن اسم یک ویدیوی منتشرشده. (title ideas, what should I call this, thumbnail text, my CTR is bad)
 ---
 
 # yt-package
 
-The title and the thumbnail are ONE unit. Writing them separately is why most packaging fails: the
-thumbnail repeats the title, and half the click surface says the same thing twice.
+عنوان و تامبنیل **یک واحدند**. اگر جدا جدا نوشته شوند، تامبنیل همان حرف عنوان را تکرار می‌کند و نصف
+جایی که می‌توانست کلیک بگیرد هدر می‌رود. این مهارت هر دو را با هم می‌نویسد و با `title.py` چک می‌کند.
+
+## دستورها
+
+از داخل پوشه‌ی همین مهارت:
 
 ```bash
-python3 title.py --title "..." --thumb "AI RAN IT"
-python3 title.py titles.txt            # one per line, ranked
+python3 -I title.py --title "کلاد کد چیه؟ ساختن اپ بدون کدنویسی در ۳۰ دقیقه" --thumb "بدون یک خط"
+python3 -I title.py titles.txt --thumb "بدون یک خط" --keyword "کلاد کد"     # هر خط یک عنوان، رتبه‌بندی‌شده
+python3 -I title.py --title "..." --keyword "کلاد کد" --keyword-en "Claude Code" --en "What is Claude Code? ..."
+python3 -I title.py --title "..." --guest "اسم مهمان" --brand "DrMounesi" --json
 ```
 
-## Before you write
+- `--keyword` کلیدواژه‌ای که باید اول عنوان بیاید (همانی که مردم جستجو می‌کنند).
+- `--thumb` متن تامبنیل؛ برای تکرار و تعداد کلمه چک می‌شود.
+- `--guest` اسم مهمان؛ عنوان نباید با آن شروع شود. بدون آن هم شروع با «دکتر…»، «گفتگو با…» گرفته می‌شود.
+- `--brand` اسم برند/کانال (پیش‌فرض DrMounesi و AI with AL)؛ باید آخر عنوان باشد.
+- `--en` ترجمه‌ی برگشتی انگلیسی عنوان، و `--keyword-en` شکل انگلیسی کلیدواژه (فقط با `--title`).
+- `--json` خروجی ماشینی. در `titles.txt` خط‌هایی که با `#` شروع می‌شوند نادیده گرفته می‌شوند.
 
-1. Read `~/.claude/youtube/voice.md` if it exists. That is the user's voice profile: how they talk
-   on camera, the words they never use, who they are talking to, what they will not claim. If it
-   does not exist, ask for **three of their own videos**, read or transcribe them, infer the voice,
-   and write the file. A script in the wrong voice is worse than no script, because they have to
-   read it out loud.
-2. Never invent a number, a result or a source. If a figure would strengthen it and you do not have
-   one, ask for it or write the line without it.
+ورودی فارسی و انگلیسی، رقم فارسی (۰-۹)، عربی (٠-٩) و لاتین، ی/ک عربی و نیم‌فاصله‌ی جاافتاده را
+می‌فهمد. ابزار فقط با کتابخانه‌ی استاندارد پایتون ۳.۹ کار می‌کند و `_fatext.py` کنار خودش را لازم دارد.
 
-## Rules the tool enforces, and why
+## قبل از نوشتن
 
-- **60 characters** is where desktop search truncates, **40** is a mobile home feed. Both are
-  reported because they fail differently: a desktop cut loses the tail, a mobile cut can lose the
-  subject.
-- **The thumbnail must not repeat the title.** Different words, same promise.
-- **Three words maximum on the thumbnail.** At feed size a fourth word is a grey smear.
-- **A number, a name or a date** beats every adjective available to you.
-- **Two all-caps words is the ceiling** before a title reads as spam.
+1. اگر `~/.claude/youtube/voice.md` هست بخوانش؛ صدای سازنده است: چطور جلوی دوربین حرف می‌زند، چه
+   کلمه‌هایی را هیچ‌وقت نمی‌گوید، با چه کسی حرف می‌زند، چه ادعایی نمی‌کند. اگر نیست، قالب فارسی‌اش در
+   `templates/voice.md` همین مجموعه است؛ سه ویدیوی خودش را بخواه، بخوان یا پیاده کن، صدایش را دربیاور
+   و فایل را بنویس. عنوانی که با صدای او نمی‌خواند، مال او نیست.
+2. **هیچ عددی، نتیجه‌ای یا منبعی را از خودت نساز.** اگر عدد عنوان را قوی‌تر می‌کند و نداری، بپرس یا
+   عنوان را بدون آن بنویس. وعده‌ای که ویدیو عملی نمی‌کند ممنوع است.
+3. کلیدواژه را با **عرضه در برابر تقاضا** انتخاب کن (جزئیاتش در مهارت `yt-seo`): عبارتی که زیاد جستجو
+   می‌شود و ویدیوی خوب کم دارد. اگر پیشنهاد خودکار یوتیوب برای کلمه‌ی تو چیز بی‌ربطی می‌دهد (مثلاً
+   «کلاد» ← «گلادیاتور»)، عبارتی را اول بیاور که مردم واقعاً تایپ می‌کنند. *(تجربه‌ی کانال DrMounesi)*
+4. اسم‌ها و اصطلاح‌هایی که از صدای ویدیو شنیدی و مطمئن نیستی را به‌صورت «شنیدم ← نوشتم» فهرست کن و
+   قبل از نهایی شدن عنوان تأیید سازنده را بگیر.
 
-## Write ten, keep two
+## قاعده‌ها، و این‌که هر کدام از کجا می‌آید
 
-Generate ten titles, run them all through `title.py`, show the user the top three with their scores
-and the specific issue on each. For the winner, write the thumbnail brief: the expression, the
-framing, the three words, and what the background has to do to hold contrast at feed size.
+| قاعده | منبع |
+|---|---|
+| حدود ۴۰ نویسه‌ی اول در فید موبایل و حدود ۶۰ نویسه در جستجوی دسکتاپ دیده می‌شود؛ سقف عنوان ۱۰۰ نویسه است. ابزار هر سه را گزارش می‌کند. | سقف ۱۰۰ = قاعده‌ی رسمی یوتیوب؛ ۴۰/۶۰ = برش رایج نمایش (تقریبی، به دستگاه بستگی دارد) |
+| هدف زیر ۶۰ تا ۷۰ نویسه؛ کلیدواژه و موضوع در ۴۰ نویسه‌ی اول. | تجربه‌ی کانال DrMounesi |
+| **کلیدواژه اول عنوان.** | تجربه‌ی کانال DrMounesi |
+| عنوان فارسی **۶ تا ۷ کلمه**؛ کمتر از ۴ یا بیشتر از ۱۰ هشدار می‌گیرد. | تجربه‌ی کانال DrMounesi |
+| عنوان با اسم مهمان یا «قسمت N» شروع نمی‌شود؛ برند و شماره‌ی قسمت همیشه آخر («… \| DrMounesi»). | تجربه‌ی کانال DrMounesi |
+| یک عدد، یک اسم یا یک تاریخ از هر صفتی قوی‌تر است. ابزار رقم فارسی و لاتین، عدد با حروف («سه روش»)، ماه شمسی و میلادی (فروردین…اسفند، ژانویه…دسامبر) و اسم‌های لاتین (Claude، ChatGPT) را می‌شناسد. اسم فارسی آدم‌ها را نمی‌شناسد؛ دستی چک کن. | قاعده‌ی سرانگشتی (upstream) + چک ابزار |
+| کلمه‌های مبهم («فوق‌العاده»، «بهترین»، «خفن»، «باورنکردنی»، «انقلابی»…) را با عدد یا نتیجه‌ی مشخص عوض کن. | قاعده‌ی سرانگشتی |
+| بیشتر از دو شکلک یا «!!!» و «؟؟» پشت‌سرهم حالت اسپم دارد. فارسی حروف بزرگ ندارد، پس برای عنوان فارسی این چک به‌جای چک حروف بزرگ انگلیسی است. | قاعده‌ی سرانگشتی؛ یوتیوب هم عنوان گمراه‌کننده و اسپمی را خلاف قوانین می‌داند |
+| **تامبنیل عنوان را تکرار نمی‌کند**: کلمه‌های متفاوت، یک وعده. مقایسه روی کلمه‌های یکدست‌شده است (ی و ک عربی، نیم‌فاصله، «ها/های»). | قاعده‌ی سرانگشتی (upstream) |
+| **حداکثر سه کلمه روی تامبنیل.** در اندازه‌ی فید، کلمه‌ی چهارم لکه‌ی خاکستری است. کلمه‌ی انگلیسی روی تامبنیل فقط اسم برند یا محصول. | قاعده‌ی سرانگشتی (upstream) + تجربه‌ی کانال DrMounesi (گرافیک فقط فارسی) |
+| **ترجمه‌ی برگشتی**: یوتیوب عنوان فارسی را از راه ترجمه هم می‌فهمد. عنوان را به انگلیسی ترجمه کن و بلند بخوان؛ اگر کلیدواژه، اسم یا عدد گم شد یا معنی برگشت، بازنویسی کن. `title_en` را نگه دار. | تجربه‌ی کانال DrMounesi |
 
-## The gate
+ابزار هر بار که عنوان فارسی بدون `--en` بگیرد یادآوری «ترجمه‌ی برگشتی» را چاپ می‌کند. ترجمه را خودت
+(یا با مترجم) بنویس، بعد با `--en "..."` دوباره اجرا کن؛ ابزار چک می‌کند کلیدواژه (`--keyword-en`، یا
+بخش لاتین کلیدواژه)، اسم‌های لاتین و عددهای عنوان در ترجمه مانده باشند.
 
-Nothing here publishes. This skill writes and you publish. Every output ends in a block the user
-copies, and the last line of every run is the question: **ship it, or change it?**
+## ده تا بنویس، دو سه تا نگه دار
+
+1. ده عنوان بنویس؛ هر کدام کلیدواژه + کنجکاوی + فایده‌ی روشن، با صدای سازنده. زاویه‌ها را عوض کن
+   (عدد، سؤال، نتیجه، اشتباه رایج، مقایسه)، نه فقط کلمه‌ها را.
+2. همه را در یک فایل بگذار و `python3 -I title.py titles.txt --keyword "..." --thumb "..."` را اجرا کن.
+3. **دو یا سه تای اول** را با امتیاز و مشکل مشخص هر کدام نشان بده. برای هر کدام ترجمه‌ی برگشتی
+   بنویس و با `--en` چک کن.
+4. پیشنهاد بده دو تای قوی را در «Test & compare» یوتیوب استودیو با هم آزمایش کند.
+5. برای برنده **بریف تامبنیل** را به فارسی بنویس:
+   - **حالت چهره:** چه حسی (تعجب، شک، خنده) و چرا با وعده‌ی عنوان جور است.
+   - **کادر:** چهره چقدر از قاب را بگیرد، از کدام طرف، کجا جای متن خالی بماند.
+   - **سه کلمه (یا کمتر):** درشت، فارسی، چیزی که عنوان **نمی‌گوید**.
+   - **پس‌زمینه:** چه رنگ و چه چیزی تا در اندازه‌ی فید کنتراست بماند و متن خوانده شود.
+   - **یک نکته‌ی تصویری:** شیء، اسکرین‌شات واقعی یا فلش، اگر به فهمیدن وعده کمک می‌کند.
+
+## چه چیزی تحویل بدهی
+
+یک بلوک قابل کپی:
+
+```
+عنوان: …
+title_en: …
+متن تامبنیل: …
+بریف تامبنیل: حالت چهره / کادر / پس‌زمینه / نکته‌ی تصویری
+گزینه‌ی دوم برای Test & compare: …
+شنیدم ← نوشتم (اگر هست): …
+```
+
+همراهش خلاصه‌ی خروجی `title.py` برای هر گزینه (امتیاز و مشکل‌ها). عددی را که سازنده نداده ننویس.
+
+## دروازه
+
+این مهارت چیزی منتشر نمی‌کند؛ می‌نویسد و سازنده خودش منتشر می‌کند. هر اجرا با بلوک قابل کپی بالا تمام
+می‌شود و آخرین خط همیشه این سؤال است:
+
+**منتشرش کنیم یا تغییرش بدیم؟**
+
+---
+
+بر پایه‌ی `yt-package` از Jake Schincariol ([youtube-agent-skill](https://github.com/Jakeschincariol/youtube-agent-skill)، MIT).

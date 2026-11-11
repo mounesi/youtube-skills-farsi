@@ -1,0 +1,30 @@
+{
+  "frontmatter_name": "yt-plan",
+  "description_fa_phrases": ["برنامه‌ی هفته‌م رو بچین", "این هفته چی بذارم؟", "تقویم محتوا"],
+  "description_en_phrases": ["plan my week", "content calendar"],
+  "body_must_contain": [
+    "~/.claude/youtube/voice.md",
+    "templates/voice.md",
+    "یک ویدیوی اصلی",
+    "یک ویدیوی کم‌هزینه",
+    "سه شورت/ریلز",
+    "ریلز خبری/ری‌اکشن",
+    "آموزش ابزار",
+    "فالو",
+    "سیو",
+    "کلمه‌ی کامنتی",
+    "قبل از انتشار",
+    "keyword.py",
+    "/yt-results",
+    "۲۴ ساعت",
+    "۷ روز",
+    "۱۰ تا ۱۴ به وقت تهران",
+    "When your viewers are on YouTube",
+    "تجربه‌ی کانال DrMounesi",
+    "قاعده‌ی تجربی",
+    "هیچ عدد"
+  ],
+  "table_columns": ["روز", "ساعت (تهران / محلی)", "قالب", "نقش", "عنوان کاری", "ثبت ۲۴ ساعت", "ثبت ۷ روز"],
+  "gate_heading": "## دروازه",
+  "gate_question": "منتشرش کنیم یا تغییرش بدیم؟"
+}

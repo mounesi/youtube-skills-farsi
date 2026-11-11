@@ -76,7 +76,8 @@ class CliErrorsTest(unittest.TestCase):
     def test_missing_file_is_an_error(self):
         r = run("/nonexistent/hooks-xyz.txt")
         self.assertNotEqual(r.returncode, 0)
-        self.assertIn("no such file", r.stderr)
+        # messages are Farsi in the Persian pack («فایل پیدا نشد» = no such file)
+        self.assertIn("پیدا نشد", r.stderr)
         self.assertEqual(r.stdout, "")
 
     def test_no_args_still_exit_1(self):
@@ -94,7 +95,7 @@ class CliErrorsTest(unittest.TestCase):
                 f.write("Why do 90% of channels die?\n\nYou are losing $500 a month.\n")
             r = run(p)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("winner:", r.stdout)
+        self.assertIn("برنده:", r.stdout)  # Farsi output: «برنده» = winner
 
 
 class ProperNounTest(unittest.TestCase):

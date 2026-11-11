@@ -1,10 +1,10 @@
 {
-  "name": "youtube-agent",
-  "description": "Eleven Claude skills that run a YouTube channel: scripts off 21 hook formulas with a scored hook, title and thumbnail linted as one pairing, an edit decision list from your transcript, a retention reader that finds the exact moments people leave, a Shorts cutter, chapters, search, comments, the weekly plan, a channel audit, and a virality engine that ranks your niche by outlier multiple rather than by channel size.",
+  "name": "youtube-farsi",
+  "description": "چهارده مهارت فارسی برای Claude که یک کانال یوتیوب و اینستاگرام را از ایده تا گزارش نتیجه جلو می‌برند: متن با ۲۱ فرمول هوک و نمره‌ی هوک فارسی، عنوان و تامبنیل به‌عنوان یک جفت، فهرست برش با خروجی DaVinci Resolve، خواندن ریتنشن، شورت و ریلز با کلمه‌ی کامنت، سئو با عرضه و تقاضا، فصل‌بندی، کامنت‌ها، برنامه‌ی هفتگی، بررسی کانال، ثبت نتیجه و بازبینی زیرنویس فارسی. بر پایه‌ی youtube-agent-skill از Jake Schincariol.",
   "version": "1.0.0",
-  "author": { "name": "Jake Schincariol", "url": "https://opusjake.ai" },
-  "homepage": "https://github.com/Jakeschincariol/youtube-agent-skill",
-  "repository": "https://github.com/Jakeschincariol/youtube-agent-skill",
+  "author": { "name": "DrMounesi", "url": "https://www.youtube.com/@DrMounesi" },
+  "homepage": "https://github.com/mounesi/youtube-skills-farsi",
+  "repository": "https://github.com/mounesi/youtube-skills-farsi",
   "license": "MIT",
-  "keywords": ["youtube", "shorts", "retention", "thumbnails", "titles", "content", "video", "seo"]
+  "keywords": ["youtube", "persian", "farsi", "instagram", "reels", "shorts", "retention", "thumbnails", "titles", "subtitles", "seo", "davinci-resolve"]
 }

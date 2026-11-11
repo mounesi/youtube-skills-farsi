@@ -58,12 +58,14 @@ class SwipeTest(unittest.TestCase):
         self.assertAlmostEqual(o["multiple"], 90000 / 11500, places=2)
         self.assertEqual(o["url"], "https://y/t4")
         txt = self.run_swipe(self.write(data)).stdout
-        self.assertIn("4 videos across 1 channels", txt)
+        # Report is now Persian (Farsi pack, intentional): "4 videos across 1 channels" -> «۴ ویدیو از ۱ کانال».
+        self.assertIn("۴ ویدیو از ۱ کانال", txt)
 
     def test_no_view_counts_is_an_error(self):
         r = self.run_swipe(self.write({"entries": [{"title": "x"}, {"title": "y"}]}))
         self.assertEqual(r.returncode, 2)
-        self.assertIn("no videos with a view count", r.stderr)
+        # Message is now Persian (intentional): "no videos with a view count".
+        self.assertIn("هیچ ویدیو یا ریلزی با عدد بازدید پیدا نشد", r.stderr)
 
     def test_videos_key_still_works(self):
         data = {"videos": [v("a", 1000), v("b", 1000), v("c", 1000), v("d", 5000)]}
@@ -116,13 +118,15 @@ class SwipeTest(unittest.TestCase):
         p = self._base()
         r = self.run_swipe(p, "--min=3")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("outliers at 3.0x or better", r.stdout)
-        self.assertIn("nothing cleared", r.stdout)
+        # Persian report (intentional): "outliers at 3.0x or better" / "nothing cleared".
+        self.assertIn("از ۳٫۰ برابرِ میانه به بالا", r.stdout)
+        self.assertIn("هیچ موردی به این آستانه نرسید", r.stdout)
 
     def test_min_space_form_still_works(self):
         r = self.run_swipe(self._base(), "--min", "2.0")
-        self.assertIn("outliers at 2.0x or better", r.stdout)
-        self.assertIn("2.00x", r.stdout)
+        # Persian report with Persian digits (intentional): "outliers at 2.0x", "2.00x".
+        self.assertIn("از ۲٫۰ برابرِ میانه به بالا", r.stdout)
+        self.assertIn("۲٫۰۰×", r.stdout)
 
     def test_min_without_value_is_usage_error(self):
         r = self.run_swipe(self._base(), "--min")
@@ -133,7 +137,7 @@ class SwipeTest(unittest.TestCase):
         self.write([v("a", 1000), v("b", 1000), v("c", 1000), v("d", 2000)], "2024")
         r = self.run_swipe("2024")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("4 videos across 1 channels", r.stdout)
+        self.assertIn("۴ ویدیو از ۱ کانال", r.stdout)  # Persian report (intentional)
 
     def test_missing_file_prints_usage(self):
         r = self.run_swipe("nope.json")

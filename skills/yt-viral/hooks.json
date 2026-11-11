@@ -1,0 +1,450 @@
+{
+ "version": "2.0",
+ "note": "۲۱ فرمول هوک برای یوتیوب و ریلز. هوک یعنی ۱۵ ثانیه‌ی اول و سه کار باید بکنه: کلیکی رو که تایتل قولش رو داده تأیید کنه، سؤالی باز کنه که بیننده نتونه خودش ببندتش، و ثابت کنه جواب واقعاً هست. هوکی که فقط کار سوم رو بکنه خلاصه‌ست و بیننده رو از دست می‌ده. هر فرمول شکل، یه مثال فارسی، یه مثال انگلیسی، حالت شکستش و الگوهایی رو داره که hookscore.py متن رو باهاشون طبقه‌بندی می‌کنه. عددهای مثال‌ها فقط شکل فرمول رو نشون می‌دن و آمار واقعی نیستن؛ عدد واقعیِ خودت رو بذار یا جمله رو بدون عدد بنویس.",
+ "match_on": "الگوها روی شکل fold‌شده‌ی متن اجرا می‌شن (_fatext.fold): بدون نیم‌فاصله (می‌دی ← میدی)، آ ← ا، بدون اعراب، رقم انگلیسی، ٬ ← ,  ٫ ← .  ٪ ← %  و حروف کوچک لاتین. پرچم re.I. برنده = بیشترین الگوی جورشده؛ در تساوی، فرمولِ بالاتر در این فایل.",
+ "source": "Based on Jakeschincariol/youtube-agent-skill (MIT, (c) Jake Schincariol); Persian version by DrMounesi.",
+ "rules": [
+  "جمله‌ی اول تایتل رو تأیید کنه. هوکی که تایتل خودش رو نادیده بگیره، دلیل رفتنِ بیننده تو ثانیه‌ی ۸ است.",
+  "یه ایده. هوکی که دو تا قول می‌ده، هیچ‌کدوم رو نگه نمی‌داره.",
+  "دقیق بهتر از بزرگه. «از ۴۰۰ به ۲۰۰ هزار تو هفت ماه» از «رشد خفن» قوی‌تره.",
+  "اگه قول یه چیز ملموس دادی، تا ثانیه‌ی ۲۰ نشونش بده.",
+  "هیچ‌وقت با معرفی خودت شروع نکن. هنوز حق درخواست سابسکرایب رو به دست نیاوردی.",
+  "ریلز: فریم صفر همون هوکه (متن روی صفحه + تصویر)، نه مقدمه."
+ ],
+ "rules_en": [
+  "Confirm the title in the first sentence. A hook that ignores its own title is why people leave at 0:08.",
+  "One idea. A hook carrying two promises keeps neither.",
+  "Specific beats big. '400 to 200,000 in seven months' outperforms 'massive growth'.",
+  "Show the artifact inside 20 seconds if you promised one.",
+  "Never open with who you are. The subscribe pitch has not been earned yet."
+ ],
+ "hooks": [
+  {
+   "id": "the-statistic",
+   "name": "The Statistic",
+   "name_fa": "آمار",
+   "shape": "یه عدد که بیننده نمی‌دونست، صاف و بی‌تعارف، بعد پیامدش.",
+   "shape_en": "A number the viewer did not know, stated flat, then the consequence.",
+   "example": "۹۷ درصد کسایی که کانال می‌زنن تا ویدیوی سی‌ام ول می‌کنن. این ۳ درصدِ بقیه یه کار رو جور دیگه انجام می‌دن.",
+   "example_en": "97% of the people who start a channel quit before video 30. Here is what the other 3% do differently.",
+   "fails_when": "اگه عدد مبهم یا غیرقابل‌بررسی باشه، هوک می‌میره. منبع رو بلند بگو.",
+   "fails_when_en": "Dies if the number is vague or unverifiable. Say the source out loud.",
+   "match": [
+    "\\d+(\\.\\d+)?\\s?درصد",
+    "\\b\\d+(\\.\\d+)?\\s?(درصد|%) (از )?(کسایی|ادمایی|کانالهایی|کانالها|ویدیوهایی|ویدیوها|مردم|کاربرها|کاربران)\\b",
+    "\\b(\\d+|یک|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پونزده|پانزده|شونزده|شانزده|هفده|هجده|هیجده|نوزده|بیست|سی|چهل|پنجاه|شصت|هفتاد|هشتاد|نود|صد|دویست|سیصد|چهارصد|پانصد|پونصد|ششصد|هفتصد|هشتصد|نهصد|هزار) (نفر |تا )?از (هر )?(\\d+|یک|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پونزده|پانزده|شونزده|شانزده|هفده|هجده|هیجده|نوزده|بیست|سی|چهل|پنجاه|شصت|هفتاد|هشتاد|نود|صد|دویست|سیصد|چهارصد|پانصد|پونصد|ششصد|هفتصد|هشتصد|نهصد|هزار)( نفر| تا)?\\b",
+    "\\b\\d{2,}(,\\d{3})+\\b",
+    "\\b\\d+(\\.\\d+)?\\s?%",
+    "\\b\\d+ (out of|in) \\d+\\b"
+   ]
+  },
+  {
+   "id": "someone-elses-result",
+   "name": "Someone Else's Result",
+   "name_fa": "نتیجه‌ی یک نفر دیگه",
+   "shape": "نتیجه‌ی یه آدم یا کانال مشخص، بعد سازوکارش.",
+   "shape_en": "A named person's outcome, then the mechanism.",
+   "example": "این کانال تو هفت ماه با یه فرمت ثابت از ۴۰۰ سابسکرایبر رسید به ۲۰۰ هزار. نقشه‌ش رو درآوردم.",
+   "example_en": "This channel went from 400 subscribers to 200,000 in seven months on one format. I mapped it.",
+   "fails_when": "عدد رو از خودت نساز. اگه نمی‌تونی اسم کانال رو بگی، فرمول دیگه‌ای انتخاب کن.",
+   "fails_when_en": "Do not invent the number. If you cannot name the channel, use a different formula.",
+   "match": [
+    "\\bاین (کانال|یوتیوبر|پیج|اکانت|کریتور|سازنده|بنده خدا|پسره|دختره|خانمه|اقاهه)\\b",
+    "\\bاز \\S+( \\S+)? (\\S+ )?(رسید|رسوند|رسیده|رسونده) به\\b",
+    "\\b(تو|توی|در|ظرف|طی) (یه|\\d+|یک|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پونزده|پانزده|شونزده|شانزده|هفده|هجده|هیجده|نوزده|بیست|سی|چهل|پنجاه|شصت|هفتاد|هشتاد|نود|صد|دویست|سیصد|چهارصد|پانصد|پونصد|ششصد|هفتصد|هشتصد|نهصد|هزار) (روز|هفته|ماه|سال)\\b",
+    "\\bthis (channel|guy|creator|account)\\b",
+    "\\bwent from .* to\\b",
+    "\\bin (a|\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty|ninety|a hundred|hundred|a thousand|thousand) (day|week|month|year)s?\\b"
+   ]
+  },
+  {
+   "id": "the-mistake",
+   "name": "The Mistake",
+   "name_fa": "اشتباه",
+   "shape": "اشتباهی رو که بیننده احتمالاً همین الان داره می‌کنه، اسم ببر.",
+   "shape_en": "Name the error the viewer is probably making right now.",
+   "example": "سی ثانیه‌ی اولِ ویدیوهات دلیل اینه که کسی تا آخر نمی‌بینتشون. مشکل از موضوعت نیست.",
+   "example_en": "Your first 30 seconds are why nobody finishes your videos. It is not the topic.",
+   "fails_when": "فقط وقتی جواب می‌ده که اشتباه رایج باشه و بیننده بتونه تو یه ثانیه خودش چکش کنه.",
+   "fails_when_en": "Only works if the mistake is common and the viewer can check it in one second.",
+   "match": [
+    "\\bاشتباه(ی|ات|اتت|ت|های|ها)?\\b",
+    "\\b(داری|دارید|داریم) (اشتباه|غلط)\\b",
+    "\\bاشتباه\\S* (رو|را) (داری|دارید|میکنی|میکنید)\\b",
+    "\\bدلیل(ش)? (اینه|این است|همینه) که\\b",
+    "\\b(مشکل|ایراد|تقصیر) (از|تو|توی|با) \\S+ نیست\\b",
+    "\\byou('re| are) (probably |still )?(doing|making)\\b",
+    "\\bthe (mistake|reason) (everyone|most people|nobody)\\b",
+    "\\bstop (doing )?\\b",
+    "\\b(is|are) (the reason |why )(nobody|no one|people|viewers|you)\\b",
+    "\\bit('s| is) not (the|your)\\b"
+   ]
+  },
+  {
+   "id": "contrarian-flip",
+   "name": "Contrarian Flip",
+   "name_fa": "خلاف جریان",
+   "shape": "توصیه‌ی رایج رو بگو، بعد ردش کن.",
+   "shape_en": "State the accepted advice, then reject it.",
+   "example": "همه می‌گن هر روز پست بذار. من یه سال هفته‌ای یه بار گذاشتم و کانالم سه برابر شد.",
+   "example_en": "Everyone says post daily. I posted once a week for a year and tripled the channel.",
+   "fails_when": "تا ۱۵ ثانیه‌ی بعد مدرک لازم داره، وگرنه فقط مخالف‌خوانیِ الکی به نظر می‌رسه.",
+   "fails_when_en": "Needs evidence in the next 15 seconds or it reads as contrarian for its own sake.",
+   "match": [
+    "\\bهمه (میگن|میگند|فکر میکنن|بهت میگن|بهتون میگن)\\b",
+    "\\b(غلطه|دروغه|اشتباهه|افسانه است|افسانهست)\\b",
+    "\\b(هیچکس|کسی) (بهت |بهتون )?(نمیگه|نمیگن|حرفش رو نمیزنه|ازش حرف نمیزنه)\\b",
+    "\\b(ولی|اما) من\\b",
+    "\\beveryone (says|thinks|tells you)\\b",
+    "\\bis (actually )?wrong\\b",
+    "\\bnobody (tells|talks about)\\b"
+   ]
+  },
+  {
+   "id": "the-reveal",
+   "name": "The Reveal",
+   "name_fa": "رونمایی",
+   "shape": "قول بده یه چیز مشخص رو نشون می‌دی، بعد نشونش بده.",
+   "shape_en": "Promise a specific thing will be shown, then show it.",
+   "example": "می‌خوام همون پرامپتی رو که این ویدیو رو نوشت، روی صفحه نشونت بدم.",
+   "example_en": "I am going to show you the exact prompt, on screen, that wrote this video.",
+   "fails_when": "باید واقعاً و زود نشونش بدی. رونمایی تو دقیقه‌ی ۸ یعنی ریزش بیننده تو دقیقه‌ی ۱.",
+   "fails_when_en": "You have to actually show it, early. A reveal at 8:00 is a retention cliff at 1:00.",
+   "match": [
+    "\\bنشونت(ون)? (بدم|میدم)\\b",
+    "\\b(روی|رو) (صفحه|مانیتور|اسکرین)\\b",
+    "\\b(ایناهاش|اینجاست|اینم از)\\b",
+    "\\bمیخوام .{0,40}(نشون|بهت نشون)",
+    "\\bI('m| am) going to show you\\b",
+    "\\bhere('s| is) (the|exactly)\\b",
+    "\\bon screen\\b"
+   ]
+  },
+  {
+   "id": "the-superlative",
+   "name": "The Superlative",
+   "name_fa": "بهترین / سریع‌ترین",
+   "shape": "تنها، بهترین، بدترین یا سریع‌ترینِ یک دسته.",
+   "shape_en": "The single best/worst/fastest of a category.",
+   "example": "این سریع‌ترین راهیه که یه ویدیوی بلند رو به سی تا شورت تبدیل کنی.",
+   "example_en": "This is the fastest way to turn one long video into thirty Shorts.",
+   "fails_when": "«ترین» ارزونه. با اسم بردن از چیزی که شکستش داده، به دستش بیار.",
+   "fails_when_en": "Superlatives are cheap. Earn it by naming what it beat.",
+   "match": [
+    "\\b\\S+ترین (راه|روش|ابزار|کار|راهی|روشی|ترفند)",
+    "\\b(تنها|بهترین|بدترین|سریعترین|سادهترین|راحتترین|ارزونترین|ارزانترین)\\b",
+    "\\bشماره (ی )?یک\\b",
+    "\\bthe (best|worst|fastest|easiest|only)\\b",
+    "\\bnumber one\\b",
+    "\\b(best|worst|fastest|easiest|quickest|simplest|cheapest) way\\b"
+   ]
+  },
+  {
+   "id": "the-clock",
+   "name": "The Clock",
+   "name_fa": "زمان‌دار",
+   "shape": "نتیجه رو با زمان محدود کن.",
+   "shape_en": "Bound the payoff in time.",
+   "example": "تا شش دقیقه‌ی دیگه یه تایتل، تامبنیل و اسکریپت آماده برای ویدیوی بعدیت داری.",
+   "example_en": "In the next six minutes you will have a working title, thumbnail and script for your next video.",
+   "fails_when": "ساعت باید راست بگه. اگه ازش بزنی بیرون، هوک ویدیوی بعدیت رو هم باور نمی‌کنن.",
+   "fails_when_en": "The clock has to be true. Overrun it and the next video's hook is not believed.",
+   "match": [
+    "\\b(تا|توی|تو|ظرف|در|زیر|کمتر از) (\\d+|یک|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پونزده|پانزده|شونزده|شانزده|هفده|هجده|هیجده|نوزده|بیست|سی|چهل|پنجاه|شصت|هفتاد|هشتاد|نود|صد|دویست|سیصد|چهارصد|پانصد|پونصد|ششصد|هفتصد|هشتصد|نهصد|هزار|یه) (ثانیه|دقیقه|ساعت)(ی|ه)?\\b",
+    "\\b(تا )?اخر (این )?(ویدیو|ویدئو)\\b",
+    "\\b(\\d+|یک|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پونزده|پانزده|شونزده|شانزده|هفده|هجده|هیجده|نوزده|بیست|سی|چهل|پنجاه|شصت|هفتاد|هشتاد|نود|صد|دویست|سیصد|چهارصد|پانصد|پونصد|ششصد|هفتصد|هشتصد|نهصد|هزار|یه) (ثانیه|دقیقه|ساعت)(ی|ه)? (دیگه|بعد)\\b",
+    "\\b(داری|خواهی داشت|دارید|خواهید داشت)[.!؟?]?\\s*$",
+    "\\b(in|within) (the next )?(\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty|ninety|a hundred|hundred|a thousand|thousand) (seconds|minutes|hours)\\b",
+    "\\bby the end of this video\\b",
+    "\\bunder (\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty|ninety|a hundred|hundred|a thousand|thousand) (seconds|minutes|hours)\\b",
+    "\\byou('ll| will) have\\b"
+   ]
+  },
+  {
+   "id": "i-tried-it",
+   "name": "I Tried It",
+   "name_fa": "خودم امتحانش کردم",
+   "shape": "آزمایش اول‌شخص با هزینه‌ای که گفته می‌شه.",
+   "shape_en": "First-person experiment with a stated cost.",
+   "example": "سی روز کانالم رو دادم دست هوش مصنوعی و به آپلودها دست نزدم، که تو مجبور نشی.",
+   "example_en": "I let an AI run my channel for 30 days. I did not touch the uploads.",
+   "fails_when": "یه هزینه‌ی واقعی لازم داره (وقت، پول، ریسک)، وگرنه چیزی در خطر نیست.",
+   "fails_when_en": "Needs a real cost - time, money, risk - or there is no stake.",
+   "match": [
+    "\\b(امتحان کردم|تست کردم|دادم دست|سپردم به|خرج کردم|ازمایش کردم|امتحانش کردم)\\b",
+    "\\b(\\d+|یک|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پونزده|پانزده|شونزده|شانزده|هفده|هجده|هیجده|نوزده|بیست|سی|چهل|پنجاه|شصت|هفتاد|هشتاد|نود|صد|دویست|سیصد|چهارصد|پانصد|پونصد|ششصد|هفتصد|هشتصد|نهصد|هزار) (روز|هفته|ماه)( تمام| کامل| پشت سر هم)? (کانالم|خودم|هر روز|من)\\b",
+    "\\b(\\d+|یک|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پونزده|پانزده|شونزده|شانزده|هفده|هجده|هیجده|نوزده|بیست|سی|چهل|پنجاه|شصت|هفتاد|هشتاد|نود|صد|دویست|سیصد|چهارصد|پانصد|پونصد|ششصد|هفتصد|هشتصد|نهصد|هزار) (روز|هفته|ماه) .{0,25}(امتحان|تست|ازمایش)",
+    "\\b(که|تا) (تو|شما) (مجبور نشی|مجبور نشید|لازم نباشه)\\b",
+    "\\bI (tried|spent|tested|let|gave)\\b",
+    "\\bfor (\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty|ninety|a hundred|hundred|a thousand|thousand) (days|weeks|months)\\b",
+    "\\bso you don'?t have to\\b"
+   ]
+  },
+  {
+   "id": "the-question",
+   "name": "The Question",
+   "name_fa": "سؤال",
+   "shape": "دقیقاً همون سؤالی رو بپرس که بیننده تو سرچ تایپ کرده.",
+   "shape_en": "Ask the exact question the viewer typed into search.",
+   "example": "چرا ویدیوهات تو ثانیه‌ی سی می‌میرن، وقتی موضوعت ایرادی نداره؟",
+   "example_en": "Why do your videos die at 30 seconds when the topic is fine?",
+   "fails_when": "باید سؤالِ بیننده باشه، نه سؤال تو. از کامنت‌های خودت درش بیار.",
+   "fails_when_en": "Must be the viewer's question, not yours. Pull it from your own comments.",
+   "match": [
+    "^(چرا|چطور|چطوری|چجوری|چگونه|چی|چه|کدوم|کدام|ایا|میشه|اصلا|کی)\\b",
+    "[?؟]\\s*$",
+    "^(why|how|what|when|should|can|is)\\b",
+    "^(do|does)\\b(?!\\s+not\\b)"
+   ]
+  },
+  {
+   "id": "the-before-after",
+   "name": "Before and After",
+   "name_fa": "قبل و بعد",
+   "shape": "دو حالت، با یه کات وسطشون.",
+   "shape_en": "Two states, one cut between them.",
+   "example": "این تامبنیل قبلیم بود. این تامبنیل الانمه. همون ویدیو، چهار برابر کلیک.",
+   "example_en": "This was my thumbnail. This is my thumbnail now. Same video, four times the click-through.",
+   "fails_when": "فقط با تصویر کار می‌کنه. روی ویدیوی فقط‌حرف‌زدن استفاده‌اش نکن.",
+   "fails_when_en": "Only works with a visual. Do not use it on a talking-head-only video.",
+   "match": [
+    "\\bقبل\\b.*\\bبعد\\b",
+    "\\b(قبلیم|قبلیمون|قبلا|سابق)\\b",
+    "\\bاین .{0,25}بود\\b.*\\bاین .{0,25}(الان|الانمه|حالا|جدیده)",
+    "\\b(همون|همین) (ویدیو|تایتل|تامبنیل|کانال|اسکریپت)\\b",
+    "\\bbefore\\b.*\\bafter\\b",
+    "\\bthis was\\b.*\\bthis is\\b",
+    "\\bused to\\b",
+    "\\bsame (video|title|thumbnail|channel|script)\\b"
+   ]
+  },
+  {
+   "id": "the-teardown",
+   "name": "The Teardown",
+   "name_fa": "کالبدشکافی",
+   "shape": "یه چیز واقعی رو جلوی همه باز کن و تیکه‌تیکه‌ش کن.",
+   "shape_en": "Take a real thing apart in public.",
+   "example": "۹ تا از پربازدیدترین ویدیوهای هوش مصنوعیِ این ماه رو درآوردم و تیکه‌تیکه بررسی کردم که تایتل‌هاشون چه وجه مشترکی دارن.",
+   "example_en": "I pulled the nine most-viewed AI videos of the month and broke down what the titles share.",
+   "fails_when": "بگو چی رو جمع کردی و چندتا. کالبدشکافیِ یه نمونه فقط یه خاطره‌ست.",
+   "fails_when_en": "Name what you pulled and how many. A teardown of one example is an anecdote.",
+   "match": [
+    "\\b(کالبدشکافی|تیکهتیکه|تیکه تیکه|موبهمو|مو به مو)",
+    "\\b(بررسی|تحلیل|انالیز) (کردم|میکنیم|کنیم|کردیم)\\b",
+    "\\b(دراوردم|جمع کردم|کشیدم بیرون|دانلود کردم)\\b",
+    "\\b(broke|break|breaking) (it )?down\\b",
+    "\\bteardown\\b",
+    "\\banalys(ed|ed|is|e)\\b",
+    "\\bI pulled\\b"
+   ]
+  },
+  {
+   "id": "the-stack",
+   "name": "The Stack",
+   "name_fa": "ترکیب دو ابزار",
+   "shape": "دو ابزار با اسم، که با هم یه نتیجه می‌دن.",
+   "shape_en": "Two named tools combined into one outcome.",
+   "example": "Claude به‌علاوه‌ی خروجی YouTube Studio، برنامه‌ی آپلود هفته‌ی بعدت رو با یه پرامپت بهت می‌ده.",
+   "example_en": "Claude plus your YouTube Studio export gives you next week's upload schedule in one prompt.",
+   "fails_when": "هر دو ابزار باید اسم داشته باشن و نتیجه واقعاً به هر دوشون نیاز داشته باشه.",
+   "fails_when_en": "Both tools must be nameable and the outcome must need both.",
+   "match": [
+    "\\b\\S+ (بهعلاوهی|بهعلاوه|به علاوهی|به علاوه|به اضافهی|به اضافه|بهاضافه) \\S+",
+    "\\b(ترکیب|کنار هم|باهم|با هم)\\b",
+    "(بهعلاوه|به علاوه|به اضافه|بهاضافه|\\+).*\\b(میده|میسازه|میشه|درمیاد)\\b",
+    "\\b\\w+ (plus|\\+) \\w+\\b",
+    "\\bcombine\\b",
+    "\\btogether\\b",
+    "\\b(plus|\\+)\\b.*\\b(gives?|makes?|equals?)\\b"
+   ]
+  },
+  {
+   "id": "the-warning",
+   "name": "The Warning",
+   "name_fa": "هشدار",
+   "shape": "هزینه‌ای که بیننده همین الان داره می‌ده.",
+   "shape_en": "A cost the viewer is about to pay.",
+   "example": "تا این یه تنظیم رو چک نکردی، ویدیوی بعدی رو آپلود نکن.",
+   "example_en": "Do not upload another video until you check this one setting.",
+   "fails_when": "اگه هزینه کوچیک باشه، هوک دروغه. نگهش دار برای وقتی که واقعاً لازمه.",
+   "fails_when_en": "If the cost is small the hook is a lie. Reserve it.",
+   "match": [
+    "\\b(اپلود|پست|منتشر|شروع|اقدام) نکن(ید)?\\b",
+    "\\bقبل از (اینکه|این که)\\b",
+    "\\bتا .{0,30}نکردی\\b",
+    "\\b(دست نگه دار|صبر کن|نکن|نزن)\\b",
+    "\\bdo not\\b",
+    "\\bdon'?t (upload|post|publish|start)\\b",
+    "\\bbefore you\\b",
+    "\\bstop\\b",
+    "\\buntil you\\b"
+   ]
+  },
+  {
+   "id": "the-list",
+   "name": "The List",
+   "name_fa": "فهرست",
+   "shape": "یه مجموعه‌ی شمرده‌شده، با عددش همون خط اول.",
+   "shape_en": "A counted set, with the count in the first line.",
+   "example": "هفت کاری که اگه الان از نو کانال می‌زدم، جور دیگه انجام می‌دادم.",
+   "example_en": "Seven things I would do differently if I started a channel in 2026.",
+   "fails_when": "عدد باید دقیق باشه و هر مورد از یه جنس دیگه باشه.",
+   "fails_when_en": "The count must be exact and every item must be different in kind.",
+   "match": [
+    "^(\\d+|یک|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پونزده|پانزده|شونزده|شانزده|هفده|هجده|هیجده|نوزده|بیست|سی|چهل|پنجاه|شصت|هفتاد|هشتاد|نود|صد|دویست|سیصد|چهارصد|پانصد|پونصد|ششصد|هفتصد|هشتصد|نهصد|هزار) (تا|کار|کاری|چیز|چیزی|نکته|ابزار|اشتباه|راه|روش|دلیل|قدم|ترفند|اپ|سایت)\\b",
+    "\\b(این|اینا|اینها) (\\d+|یک|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پونزده|پانزده|شونزده|شانزده|هفده|هجده|هیجده|نوزده|بیست|سی|چهل|پنجاه|شصت|هفتاد|هشتاد|نود|صد|دویست|سیصد|چهارصد|پانصد|پونصد|ششصد|هفتصد|هشتصد|نهصد|هزار) (تا|کار|چیز|نکته|ابزار|راه|روش|دلیل|قدم|ترفند)\\b",
+    "^(\\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|fifty|a hundred|hundred) \\w+",
+    "\\b(here are|these are) (\\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|fifty|a hundred|hundred)\\b"
+   ]
+  },
+  {
+   "id": "the-receipt",
+   "name": "The Receipt",
+   "name_fa": "مدرک",
+   "shape": "اول خودِ مدرک رو نشون بده، بعد توضیح بده.",
+   "shape_en": "Show the artifact first, explain second.",
+   "example": "این صفحه‌ی آنالیتیکس کانالمه، اسکرین‌شات واقعی. این ویدیو به‌تنهایی ۴۰ درصد واچ‌تایم کانال رو آورد.",
+   "example_en": "This is the analytics page. This video did 40% of the channel's watch time. Here is why.",
+   "fails_when": "اسکرین‌شات واقعی لازم داره. مدرکی که فقط تعریفش کنی، مدرک نیست.",
+   "fails_when_en": "Requires a real screenshot. A described receipt is not a receipt.",
+   "match": [
+    "\\bاین (صفحه|داشبورد|اسکرینشات|امار|نمودار|درامد|گزارش)(ی)? ",
+    "\\b(اسکرینشات|مدرک|سند|رسید)\\b",
+    "(انالیتیکس|داشبورد|استودیو)",
+    "\\bاین (ویدیو|پست|ریل) .{0,30}(اورد|ساخت|گرفت|درامد داشت)\\b",
+    "\\bthis is (the|my) (analytics|dashboard|stats|revenue|earnings|data|proof|screenshot|numbers?|results?)\\b",
+    "\\bscreenshot\\b",
+    "\\bproof\\b",
+    "\\breceipts?\\b",
+    "\\b(analytics|dashboard|earnings|revenue) (page|screen|report|tab)\\b",
+    "\\bthis (video|post|one) (did|made|earned|got)\\b"
+   ]
+  },
+  {
+   "id": "the-insider",
+   "name": "The Insider",
+   "name_fa": "پشت پرده",
+   "shape": "اطلاعاتی از داخلِ یک سیستم.",
+   "shape_en": "Information from inside a system.",
+   "example": "یوتیوب بهت می‌گه کدوم ویدیوهات عقب موندن، ولی این گزارش یه گوشه قایم شده و تقریباً هیچ‌کس بازش نمی‌کنه.",
+   "example_en": "YouTube tells you which videos are underperforming. Almost nobody opens the report.",
+   "fails_when": "ادعای دسترسی‌ای که نداری نکن.",
+   "fails_when_en": "Do not claim insider access you do not have.",
+   "match": [
+    "\\b(هیچکس|کسی|بیشتر ادما|اکثرا) .{0,20}(بازش|باز|نگاش|سراغش|ازش استفاده)\\s?(نمیکنه|نمیکنن|نمیره|نمیرن)\\b",
+    "\\b(قایم|مخفی|پنهان|پنهون|پشت پرده|پشت صحنه)",
+    "\\b(یوتیوب|اینستاگرام|الگوریتم|گوگل) (بهت|بهتون) (میگه|نشون میده)\\b",
+    "\\b(nobody|almost nobody|most people) (knows?|opens?|uses?)\\b",
+    "\\bhidden\\b",
+    "\\bburied\\b"
+   ]
+  },
+  {
+   "id": "the-impossible",
+   "name": "The Impossible Claim",
+   "name_fa": "ادعای غیرممکن",
+   "shape": "یه چیزی بگو که باورکردنی به نظر نمی‌رسه، بعد ثابتش کن.",
+   "shape_en": "State something that sounds untrue, then prove it.",
+   "example": "می‌تونی اسکریپت، تایتل، تامبنیل و برنامه‌ی یه هفته ویدیو رو بدون باز کردن حتی یه ادیتور آماده کنی.",
+   "example_en": "You can write, title, thumbnail and schedule a week of videos without opening a single editor.",
+   "fails_when": "اثبات باید تا ۲۰ ثانیه شروع بشه، وگرنه کلیک‌بیت به نظر می‌رسه.",
+   "fails_when_en": "The proof has to start within 20 seconds or it reads as clickbait.",
+   "match": [
+    "\\bبدون\\b",
+    "\\b(هیچوقت|هرگز)\\b",
+    "\\b(حتی یه|حتی یک|صفر)\\b",
+    "\\bبا یه (کلیک|پرامپت|دکمه)\\b",
+    "\\bwithout\\b",
+    "\\bnever\\b",
+    "\\bin one\\b",
+    "\\bzero\\b"
+   ]
+  },
+  {
+   "id": "the-comparison",
+   "name": "The Comparison",
+   "name_fa": "مقایسه",
+   "shape": "دو گزینه‌ی مشخص، یه برنده.",
+   "shape_en": "Two named options, one winner.",
+   "example": "یه ویدیو رو به سه شکل نوشتم. یکی‌شون ۶۲ درصد بیننده‌ها رو نگه داشت، اون دوتای دیگه نه.",
+   "example_en": "I wrote the same video three ways. One of them held 62% and the other two did not.",
+   "fails_when": "بازنده رو بلند بگو. مقایسه‌ای که بازنده نداره، تبلیغه.",
+   "fails_when_en": "Say the losing option out loud. A comparison with no loser is an advert.",
+   "match": [
+    "\\b(در برابر|در مقابل|علیه)\\b",
+    "\\bکدوم(ش|شون)? (بهتره|میبره|برندهست|برنده است)\\b",
+    "\\b(به|با) (دو|سه|چهار|\\d+|یک|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پونزده|پانزده|شونزده|شانزده|هفده|هجده|هیجده|نوزده|بیست|سی|چهل|پنجاه|شصت|هفتاد|هشتاد|نود|صد|دویست|سیصد|چهارصد|پانصد|پونصد|ششصد|هفتصد|هشتصد|نهصد|هزار) (شکل|روش|مدل|جور|حالت)\\b",
+    "\\b(یکیشون|اون (یکی|دوتای|سهتای|دو تای|سه تای) دیگه)\\b",
+    "\\bvs\\.?\\b",
+    "\\bversus\\b",
+    "\\bwhich (one )?(is|wins)\\b",
+    "\\bsame .* (three|two) ways\\b",
+    "\\b(one of them|the other (one|two|three))\\b"
+   ]
+  },
+  {
+   "id": "the-origin",
+   "name": "The Origin",
+   "name_fa": "ریشه",
+   "shape": "نتیجه واقعاً از کجا اومده.",
+   "shape_en": "Where a result actually came from.",
+   "example": "همه‌ی ویدیوهای این کانال از یه فایل دوازده‌خطی شروع می‌شن. ایناهاش.",
+   "example_en": "Every video on this channel starts in the same 12-line file. Here it is.",
+   "fails_when": "فقط یه بار برای هر کانال جواب می‌ده. رونمایی از خودته و فقط یه دونه داری.",
+   "fails_when_en": "Works once per channel. It is a reveal about you, and you only have one.",
+   "match": [
+    "\\b(همه|هر|همهی) .{0,40}(شروع میشن|شروع میشه)\\b",
+    "\\bاز (همین|همون|یه|یک) .{0,25}شروع (میشن|میشه|شد|شدن)\\b",
+    "\\b(ماجرا|همه چی|همهچی|همه چیز) از .{0,25}شروع (شد|میشه)\\b",
+    "\\bریشه(ی|ش)?\\b",
+    "\\bevery (video|post) .* starts\\b",
+    "\\bit all (starts|started)\\b",
+    "\\bthe (real )?reason\\b",
+    "\\b(starts?|started|begins?) (in|with|from) (the same|one|a single)\\b"
+   ]
+  },
+  {
+   "id": "the-deadline",
+   "name": "The Deadline",
+   "name_fa": "ضرب‌الاجل",
+   "shape": "یه چیزی تو یه تاریخ مشخص داره عوض می‌شه.",
+   "shape_en": "Something is changing on a date.",
+   "example": "فرمت قدیمی توضیحات از این ماه دیگه جواب نمی‌ده. این جایگزینشه.",
+   "example_en": "The old description format stops mattering this month. Here is what replaces it.",
+   "fails_when": "فقط با تاریخ واقعی و قابل‌بررسی. این فرمول از همه سریع‌تر اعتماد رو از بین می‌بره.",
+   "fails_when_en": "Only use with a real, checkable date. This is the fastest formula to lose trust with.",
+   "match": [
+    "\\b(این|از این|تا اخر|اخر) (هفته|ماه|سال)\\b",
+    "\\b(امسال|از فردا|از امروز به بعد|از هفته بعد|از ماه بعد)\\b",
+    "\\bدیگه (جواب نمیده|کار نمیکنه|حساب نمیشه|مهم نیست)\\b",
+    "\\b(داره عوض میشه|عوض شد|تغییر کرد|جایگزین)",
+    "\\b(this|next) (week|month|year)\\b",
+    "\\bis changing\\b",
+    "\\bno longer\\b",
+    "\\bas of\\b",
+    "\\bstops? (mattering|working|counting)\\b"
+   ]
+  },
+  {
+   "id": "the-direct-address",
+   "name": "The Direct Address",
+   "name_fa": "خطاب مستقیم",
+   "shape": "بیننده‌ی دقیقش رو تو شش کلمه‌ی اول صدا بزن.",
+   "shape_en": "Name the exact viewer in the first six words.",
+   "example": "اگه زیر هزار تا سابسکرایبر داری، این تنها ویدیوییه که این هفته لازم داری.",
+   "example_en": "If you have under a thousand subscribers, this is the only video you need this week.",
+   "fails_when": "باریک بهتر از پهنه. «اگه ویدیو می‌سازی» یعنی هیچ‌کس.",
+   "fails_when_en": "Narrow beats broad. 'If you make videos' addresses nobody.",
+   "match": [
+    "^(اگه|اگر)\\b",
+    "\\bبرای (هرکسی|هر کسی|کسایی|اونایی|کسی) که\\b",
+    "\\b(مخصوص|دقیقا) (تو|خودت|خودتون|شما)\\b",
+    "\\b(اگه|اگر) .{0,40}(داری|هستی|میکنی|میسازی|زدی|داشتی)\\b",
+    "^if you\\b",
+    "\\bfor (anyone|everyone|people) who\\b",
+    "\\byou specifically\\b",
+    "\\bif you (have|are|run|make|own|started)\\b"
+   ]
+  }
+ ]
+}

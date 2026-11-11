@@ -1,109 +1,202 @@
-# The YouTube agent skill
+<div dir="rtl">
 
-Eleven Claude skills that run a YouTube channel. Free, MIT, no signup, no API key, nothing to
-connect.
+# مهارت‌های یوتیوب برای Claude، نسخه‌ی فارسی
 
-One of them writes your script off 21 hook formulas and scores the hook before you waste a take on
-it. One lints the title and the thumbnail as a single pairing, because writing them separately is
-why half of your click surface says the same thing twice. One reads your audience-retention export
-and tells you the exact second people left and what you were saying when they did. One turns a
-transcript into an edit decision list. One finds the Shorts already hiding inside a long video. One
-goes and finds what is working in your niche and ranks it by how far each video beat its own
-channel, not by how big the channel is.
+چهارده مهارت (skill) برای Claude که کار یک کانال فارسی یوتیوب و اینستاگرام را از ایده تا گزارش نتیجه جلو می‌برند. رایگان، با مجوز MIT، بدون ثبت‌نام، بدون کلید API و بدون اتصال به هیچ حسابی.
 
-**Nothing gets published until you do it.** These skills write. You upload.
+این بسته بر پایه‌ی [youtube-agent-skill](https://github.com/Jakeschincariol/youtube-agent-skill) از Jake Schincariol ساخته شده است: یازده مهارت اصلی به فارسی برگشته‌اند و بهتر شده‌اند، ۴۶ باگ نسخه‌ی اصلی اصلاح شده، و سه مهارت تازه از روند کاری کانال DrMounesi اضافه شده است: `yt-reel`، `yt-results` و `yt-subtitle`.
 
-## Install
+یکی از این مهارت‌ها از روی ۲۱ فرمول هوک برایت متن می‌نویسد و قبل از اینکه یک برداشت را هدر بدهی، هوک فارسی‌ات را نمره می‌دهد. یکی عنوان و تامبنیل را با هم، به‌عنوان یک جفت، بررسی می‌کند و عنوان را به انگلیسی برمی‌گرداند تا ببینی یوتیوب چه می‌فهمد. یکی فایل ریتنشن YouTube Studio را می‌خواند و ثانیه‌ای را که مخاطب رفت، همراه با حرفی که همان لحظه می‌زدی، نشانت می‌دهد. یکی از روی متن ویدیو فهرست برش می‌سازد و فایلی می‌دهد که در DaVinci Resolve باز می‌شود. یکی برای کلمه‌ی کامنتِ ریلزت همه‌ی شکل‌های غلطی را که مردم تایپ می‌کنند می‌سازد تا دایرکت خودکار هیچ‌کدام را جا نیندازد. یکی هم زیرنویس فارسی را، از ی و ک عربی تا نیم‌فاصله و سرعت خواندن، بازبینی می‌کند.
 
-Paste this into Claude:
+**تا خودت منتشر نکنی، هیچ چیزی منتشر نمی‌شود.** این مهارت‌ها می‌نویسند؛ آپلود با توست.
 
-```
-https://github.com/Jakeschincariol/youtube-agent-skill
+## چهارده مهارت
 
-Install this skill, then confirm /yt-script works.
-```
-
-Or do it yourself, in Claude Code:
-
-```bash
-git clone https://github.com/Jakeschincariol/youtube-agent-skill.git
-cp -r youtube-agent-skill/skills/yt-* ~/.claude/skills/
-```
-
-Or as a plugin:
-
-```
-/plugin marketplace add Jakeschincariol/youtube-agent-skill
-/plugin install youtube-agent
-```
-
-Project-local instead of global: copy the same folders into your repo's `.claude/skills/`. No Claude
-Code at all? Paste any single `SKILL.md` at the top of a chat and it runs as a mode. You lose the six
-Python tools, which is most of the point of `/yt-script`, `/yt-retention` and `/yt-edit`, but the
-rest works.
-
-Then spend ten minutes on [`templates/voice.md`](templates/voice.md). Copy it to
-`~/.claude/youtube/voice.md` and fill it in, or send Claude three of your own videos and say "write
-my voice.md from these". The writing skills (script, package, comment, shorts, seo, plan) read that file. It matters more here than anywhere else,
-because you have to say the words out loud.
-
-## The eleven
-
-| command | what it does |
+| فرمان | چه کار می‌کند |
 | --- | --- |
-| `/yt-script` | One idea into a script. Five hooks off [21 formulas](skills/yt-script/hooks.json), scored, then the spoken script with the retention beats marked. |
-| `/yt-package` | Title and thumbnail as one pairing, linted for truncation, duplication and vagueness. |
-| `/yt-edit` | A transcript into an edit decision list: dead air, filler cues, retakes, with timecodes. |
-| `/yt-comment` | The comment section triaged into four piles, then replies in your voice. Says which one to pin. |
-| `/yt-plan` | A week that fits the hours you actually have. One anchor, one cheap one, three Shorts. |
-| `/yt-viral` | What is working in your niche, ranked by multiple over each channel's own median. |
-| `/yt-retention` | Your retention export read properly: hook leak, the cliffs, the slide, and what to change. |
-| `/yt-shorts` | The Shorts already inside a long video, with a new first line written for each. |
-| `/yt-seo` | The description, the tags that are worth having, and the three queries this should win. |
-| `/yt-chapters` | Chapters from a transcript, validated against YouTube's own rules so they render. |
-| `/yt-audit` | The whole channel, ending in ONE fix rather than twenty. |
+| `/yt-script` | یک ایده را به متن تبدیل می‌کند: پنج هوک از روی [۲۱ فرمول](skills/yt-script/hooks.json)، نمره‌دار، و بعد متن گفتاری با نقطه‌های حفظ ریتنشن. |
+| `/yt-package` | عنوان و تامبنیل به‌عنوان یک جفت: طول، تکرار، کلی‌گویی، تعداد کلمه‌ها، جای کلیدواژه و ترجمه‌ی برگشتی به انگلیسی. |
+| `/yt-edit` | از متن زمان‌دار فهرست برش می‌سازد: سکوت، کلمه‌های پرکننده‌ی فارسی و شروع دوباره، با خروجی برای DaVinci Resolve. |
+| `/yt-comment` | کامنت‌ها را در چهار دسته مرتب می‌کند، با لحن خودت جواب می‌نویسد و می‌گوید کدام را پین کنی. |
+| `/yt-plan` | برنامه‌ی هفته به اندازه‌ی ساعت‌هایی که واقعاً داری: یک ویدیوی اصلی، یک کار سبک و سه شورت. |
+| `/yt-viral` | چه چیزی در حوزه‌ی تو جواب می‌دهد، رتبه‌بندی‌شده بر اساس چند برابرِ میانه‌ی خودِ هر کانال. |
+| `/yt-retention` | فایل ریتنشن را درست می‌خواند: نشت هوک، پرتگاه‌ها، شیب ریزش و اینکه چه چیزی را عوض کنی. |
+| `/yt-shorts` | شورت‌هایی که همین حالا داخل ویدیوی بلندت هستند، با یک جمله‌ی اول تازه برای هرکدام. |
+| `/yt-seo` | انتخاب عبارت با سنجش عرضه و تقاضا، توضیحات کامل، هشتگ، تگ و کامنت پین‌شده. |
+| `/yt-chapters` | فصل‌بندی از روی متن، بررسی‌شده با قانون‌های خود یوتیوب تا واقعاً نمایش داده شود. |
+| `/yt-audit` | کل کانال را بررسی می‌کند و آخرش فقط **یک** اصلاح پیشنهاد می‌دهد، نه بیست تا. |
+| `/yt-reel` | ریلز اینستاگرام یا شورت با هوک در فریم صفر، دعوت به کامنت با کلمه‌ی کلیدی، و بررسی اینکه پیام دایرکت قبل از انتشار آماده باشد. |
+| `/yt-results` | ثبت نتیجه در ۲۴ ساعت و ۷ روز، نرخ‌ها به ازای هر هزار بازدید و مقایسه با میانه‌ی حساب خودت. |
+| `/yt-subtitle` | بازبینی زیرنویس فارسی: ی و ک عربی، نیم‌فاصله، علامت‌های فارسی، طول خط، سرعت خواندن و فهرست واژه‌های نامطمئن. |
 
-## The six tools
+## نصب
 
-Every one of these runs on a clean Python 3 with no dependencies. They are the reason the skills are
-not just prompts.
+این را در Claude بچسبان:
 
-```bash
-python3 skills/yt-script/hookscore.py --hook "one line"        # 5-property hook panel
-python3 skills/yt-package/title.py --title "..." --thumb "..." # title + thumbnail linter
-python3 skills/yt-edit/deadair.py transcript.srt               # edit decision list
-python3 skills/yt-chapters/chapters.py transcript.srt          # validated chapters
-python3 skills/yt-retention/retention.py retention.csv         # where they left, and why
-python3 skills/yt-viral/swipe.py collected.json --min 2.0      # outliers by own-channel multiple
+</div>
+
+```
+https://github.com/mounesi/youtube-skills-farsi
+
+این مهارت‌ها را نصب کن و بعد بررسی کن که /yt-script کار می‌کند.
 ```
 
-## The fine print
+<div dir="rtl">
 
-The part most packs leave out.
+یا خودت در Claude Code نصبش کن:
 
-**It does not publish.** YouTube's Data API would allow it with your own OAuth, which makes this
-pack different from the LinkedIn and Instagram ones, where posting is not available at all. It is
-still not built here: every skill ends in a block you copy and a question — ship it, or change it?
-Anything that claims to run your channel unattended should be read with that distinction in mind.
+</div>
 
-**`hookscore.py` is a heuristic, not a predictor.** The panel was built and calibrated against 74
-real short-form hooks (the first 15 seconds of auto-captions, top-8 and bottom-8 by views across
-five channels). It separates deliberately bad hooks from real ones well. It separates a given
-creator's hits from their own misses barely at all. A low score is a reason to look again; a high
-score is not a promise.
+```bash
+git clone https://github.com/mounesi/youtube-skills-farsi.git
+cp -r youtube-skills-farsi/skills/yt-* ~/.claude/skills/
+```
 
-**The formula classifier is about the words, not the result.** When `/yt-viral` says a title used
-The Statistic, that is a judgement about the title you can see, not a claim about why the video got
-its views.
+<div dir="rtl">
 
-**`/yt-viral` reads, it does not scrape.** Public listings only. It never logs in as you and never
-touches your credentials.
+یا به‌شکل پلاگین:
 
-**Tags barely matter** and this pack says so instead of selling you a tag generator.
+</div>
 
-**Nothing invents a number.** If a skill wants a figure it does not have, it asks you for it or
-writes the line without it.
+```
+/plugin marketplace add mounesi/youtube-skills-farsi
+/plugin install youtube-farsi
+```
 
-## Licence
+<div dir="rtl">
 
-MIT. Use it, change it, ship it.
+اگر می‌خواهی فقط در یک پروژه کار کند، همین پوشه‌ها را در `.claude/skills/` همان پروژه کپی کن. هر پوشه‌ی مهارت به‌تنهایی هم کار می‌کند؛ اگر فقط `yt-subtitle` را می‌خواهی، فقط همان را کپی کن.
+
+Claude Code نداری؟ هر فایل `SKILL.md` را اول گفت‌وگو بچسبان تا مثل یک حالت کار کند. ابزارهای پایتون را از دست می‌دهی، که بخش مهمی از `/yt-script`، `/yt-retention`، `/yt-edit` و `/yt-subtitle` است، ولی بقیه کار می‌کند.
+
+بعد ده دقیقه برای [`templates/voice.md`](templates/voice.md) وقت بگذار. آن را در `~/.claude/youtube/voice.md` کپی کن و پرش کن، یا متن سه ویدیوی خودت را به Claude بده و بگو «voice.md من را از روی این‌ها بنویس». مهارت‌هایی که می‌نویسند قبل از نوشتن این فایل را می‌خوانند. این‌جا از هر جای دیگری مهم‌تر است، چون متن را باید بلند جلوی دوربین بگویی.
+
+## ابزارها
+
+ابزارها روی پایتون ۳٫۹ یا جدیدتر، بدون هیچ کتابخانه‌ی اضافه، اجرا می‌شوند. همین ابزارها هستند که این مهارت‌ها را از یک پرامپت ساده جدا می‌کنند. همه ورودی فارسی و انگلیسی را می‌فهمند، با ارقام فارسی (۰-۹) و عربی (٠-٩)، ممیز «٫»، جداکننده‌ی «٬» و «هزار»، «میلیون»، K، M و B. با `--help` راهنمای فارسی هر ابزار را می‌بینی و با `--json` خروجی ماشینی می‌گیری.
+
+مسیرها نسبت به ریشه‌ی همین مخزن است؛ اگر مهارت‌ها را در `~/.claude/skills/` کپی کرده‌ای، به‌جای `skills/` بنویس `~/.claude/skills/`.
+
+</div>
+
+```bash
+# هوک: پنج ویژگی، هرکدام از ۱۰۰، و یک حکم
+python3 -I skills/yt-script/hookscore.py --hook "قبل از اینکه یه دلار دیگه خرج ChatGPT کنی، این ۳ تا ابزار رو ببین"
+python3 -I skills/yt-script/hookscore.py hooks.txt          # هر خط یک هوک، رتبه‌بندی‌شده
+
+# عنوان و تامبنیل، به‌عنوان یک جفت
+python3 -I skills/yt-package/title.py --title "..." --thumb "سه کلمه‌ی بزرگ"
+python3 -I skills/yt-package/title.py titles.txt --thumb "..."   # هر خط یک عنوان، رتبه‌بندی‌شده
+python3 -I skills/yt-package/title.py --title "..." --keyword "کلاد کد" --en "Claude Code in 10 minutes"
+
+# فهرست برش از روی متن زمان‌دار (.srt / .vtt / JSON خروجی Whisper)
+python3 -I skills/yt-edit/deadair.py transcript.srt
+python3 -I skills/yt-edit/deadair.py transcript.srt --floor 0.35          # پیش‌فرض: فقط پیشنهاد برش، هیچ چیزی حذف نمی‌شود
+python3 -I skills/yt-edit/deadair.py take.json --mode learning           # ویدیوی آموزشی: پرکننده و تکرار بریده، مکث‌ها ۰٫۲ ثانیه
+python3 -I skills/yt-edit/deadair.py take.json --edl take.edl --fps 30   # EDL از نوع CMX3600 برای DaVinci Resolve
+python3 -I skills/yt-edit/deadair.py take.json --markers take-markers.csv   # فهرست مارکر (CSV، یا EDL اگر پسوند .edl باشد)
+
+# فصل‌بندی
+python3 -I skills/yt-chapters/chapters.py transcript.srt --target 8
+
+# ریتنشن: کجا رفتند و چرا
+python3 -I skills/yt-retention/retention.py retention.csv
+python3 -I skills/yt-retention/retention.py retention.csv --transcript transcript.srt --duration 612
+
+# ویدیوهایی که از میانه‌ی کانال خودشان جلو زده‌اند
+python3 -I skills/yt-viral/swipe.py collected.json --min 2.0
+
+# توضیحات و تگ‌ها
+python3 -I skills/yt-seo/seo.py description.txt --tags "هوش مصنوعی,AI,کلاد,Claude"
+python3 -I skills/yt-seo/seo.py description.txt --duration 18:42 --title "..." --keyword "کلاد کد"
+
+# گونه‌های املایی کلمه‌ی کامنت، برای اتوماسیون کامنت به دایرکت
+python3 -I skills/yt-reel/keyword.py "آرتیفکت" --also artifact
+python3 -I skills/yt-reel/keyword.py "آرتیفکت" --also artifact --regex --test "ارتیفکت لطفا"
+
+# ثبت نتیجه و مقایسه با میانه‌ی حساب خودت
+python3 -I skills/yt-results/results.py --log results.csv --add video_id=ID platform=instagram format=reel checked_at=24h views=12.4K
+python3 -I skills/yt-results/results.py --log results.csv --report --checked 24h
+python3 -I skills/yt-results/results.py --fields              # فهرست ستون‌ها و نام‌های فارسی‌شان
+
+# بازبینی زیرنویس فارسی
+python3 -I skills/yt-subtitle/fasubs.py subtitles.srt
+python3 -I skills/yt-subtitle/fasubs.py subtitles.srt --fix      # فایل subtitles.fixed.srt، فقط اصلاح‌های بی‌خطر
+python3 -I skills/yt-subtitle/fasubs.py subtitles.srt --unsure   # جدول «شنیده ← نوشته» برای تأیید خودت
+```
+
+<div dir="rtl">
+
+(عددهای نمونه‌ی بالا فقط برای نشان دادن قالب ورودی‌اند.)
+
+## چه چیزهایی اصلاح شد
+
+قبل از ترجمه، کل نسخه‌ی اصلی بازبینی شد: ۷۱ باگ مشکوک پیدا شد، هرکدام را یک بازبین مستقل دوباره بررسی کرد، و ۴۶ مورد تأیید و اصلاح شد. بقیه رد شدند. نمونه‌ها: خروجی yt-dlp که خود نسخه‌ی اصلی پیشنهاد می‌کرد بی‌صدا «۰ ویدیو» خوانده می‌شد؛ هر شورتی با محور ثانیه محور درصدی حساب می‌شد؛ برش‌های هم‌پوشان دو بار شمرده می‌شدند و ویدیو «۱۴۰٪ کوتاه‌تر» می‌شد. برای هر اصلاح تستی در `tests/upstream/` هست که نمی‌گذارد باگ برگردد.
+
+فهرست کامل: [`UPSTREAM-FIXES.md`](UPSTREAM-FIXES.md)
+
+## فرق با نسخه‌ی اصلی
+
+- **همه‌چیز فارسی است**: متن مهارت‌ها، پیام‌ها و راهنمای ابزارها، قالب‌ها و همین README. متنی که برای جلوی دوربین نوشته می‌شود محاوره است («می‌گیره»، «می‌خوندی»)، نه ترجمه‌ی کتابی.
+- **نمره‌ی هوک فارسی**: `hookscore.py` خطاب («تو»، «شما»، «بهت»، «برات»)، فعل امری («ببین»، «نکن»)، واژه‌های ریسک («ضرر»، «قبل از اینکه»)، کنجکاوی («چرا»، «چطور»، «هیچ‌کس»)، کلی‌گویی («خفن»، «باورنکردنی») و پرکننده‌ها («سلام دوستان»، «توی این ویدیو») را در فارسی می‌شناسد و کوتاهی هوک را با سرعت گفتار فارسی (حدود ۲٫۳ تا ۲٫۶ کلمه در ثانیه) می‌سنجد.
+- **عدد و نویسه‌ی فارسی**: ارقام فارسی و عربی، «٫» و «٬»، «۱۲٫۴ هزار» و «۱/۵ میلیون» همه درست خوانده می‌شوند؛ ی و ک عربی و نیم‌فاصله یکسان‌سازی می‌شوند؛ اسم‌های لاتین داخل متن فارسی (Claude، ChatGPT) «اسم مشخص» حساب می‌شوند.
+- **عنوان برای یوتیوبِ فارسی**: هدف ۶ تا ۷ کلمه، کلیدواژه اول، اسم مهمان و «قسمت N» آخر، و ترجمه‌ی برگشتی به انگلیسی، چون یوتیوب عنوان فارسی را از راه ترجمه می‌فهمد.
+- **سئو با عرضه و تقاضا**: عبارتی را انتخاب کن که زیاد جستجو می‌شود ولی ویدیوی خوب کمی جوابش را داده. حکم‌ها: GAP، CONTESTED، CROWDED و LOW DEMAND. توضیحات با خط هوک، ویدیوی بعدی از پلی‌لیست، فصل‌ها، یک بلوک کوتاه انگلیسی در آخر و فقط سه هشتگ.
+- **اینستاگرام هم هست**: ریلز با هوک در فریم صفر، خط اول کپشن تا ۱۲۵ نویسه، حداکثر ۵ هشتگ، و دعوت به کامنت با کلمه‌ی کلیدی («کامنت کن «X» تا آموزشش رو برات بفرستم»)، همراه با فهرست گونه‌های املایی آن کلمه برای اتوماسیون دایرکت.
+- **خروجی DaVinci Resolve**: فهرست برش به‌شکل EDL از نوع CMX3600 و فهرست مارکر. در حالت پیشنهادی، بازه‌ها به‌شکل مارکر روی تایم‌لاین کامل می‌نشینند؛ در حالت آموزشی، EDL فقط تکه‌های ماندنی را دارد. برش هیچ‌وقت وسط کلمه نمی‌افتد.
+- **پیشنهاد برش، نه حذف**: برای گفت‌وگو و ویدیوی رو به دوربین، تایم‌لاین کامل می‌ماند و فقط بازه‌ها علامت می‌خورند. برای ویدیوی آموزشی، تپق‌ها، شروع‌های دوباره و پرکننده‌ها بریده می‌شوند و مکث‌ها تا حدود ۰٫۲ ثانیه کوتاه می‌شوند. پرکننده‌های فارسی («اِ»، «خب»، «یعنی»، «چیزه»، «دیگه» وقتی تنها می‌آید) شناخته می‌شوند.
+- **زیرنویس فارسی**: یوتیوب برای فارسی زیرنویس خودکار نمی‌سازد، پس `yt-subtitle` فایل SRT را قبل از آپلود بازبینی می‌کند و واژه‌هایی را که از صدا مطمئن نیستی («شنیده‌شده ← نوشته‌شده») جدا می‌کند تا خودت تأیید کنی.
+- **ثبت نتیجه**: `yt-results` به‌جای فقط بازدید، فالو، سیو و اشتراک‌گذاری به ازای هر هزار بازدید را در ۲۴ ساعت و ۷ روز ثبت می‌کند و با میانه‌ی حساب خودت مقایسه می‌کند.
+- **نکته‌های انتشار برای مخاطب فارسی‌زبان**: زبان ویدیو Persian (general)، نه Persian (Iran)؛ اول خصوصی آپلود کن و بعد از پردازش HD عمومی‌اش کن؛ چند ساعت قبل از اوج حضور مخاطبت منتشر کن و آن را با آمار «When your viewers are on YouTube» خودت بسنج.
+- **نوشتن برای صدای هوش مصنوعی**: عدد و تاریخ با حروف، اسم خارجی با حروف فارسی، و برچسب «صدای هوش مصنوعی» روی ویدیو.
+- **قابل‌حمل**: هر پوشه‌ی مهارت به‌تنهایی کار می‌کند. کد مشترک فارسی در `lib/fatext.py` است و یک کپی از آن با نام `_fatext.py` در هر مهارتی که لازمش دارد گذاشته می‌شود.
+
+## ریزه‌کاری‌ها و محدودیت‌ها
+
+همان بخشی که بیشتر بسته‌ها جا می‌اندازند.
+
+**هیچ چیزی منتشر نمی‌کند.** هر مهارت با یک بلوک قابل‌کپی و این سؤال تمام می‌شود: «منتشرش کنیم یا تغییرش بدیم؟» آپلود، زمان‌بندی و ارسال دایرکت با خودت است. هر ابزاری که ادعا می‌کند بدون تو کانالت را اداره می‌کند، با همین تفاوت در ذهن بخوان.
+
+**`hookscore.py` یک قاعده‌ی سرانگشتی است، نه پیش‌بین.** نسخه‌ی اصلی روی ۷۴ هوک واقعیِ انگلیسی سنجیده شده بود: هوک‌های عمداً بد را خوب از هوک‌های واقعی جدا می‌کند، ولی موفق‌ترین ویدیوهای یک سازنده را از ناموفق‌هایش تقریباً جدا نمی‌کند. واژه‌نامه‌های فارسی از تجربه‌ی کانال DrMounesi آمده‌اند، نه از یک آزمون آماری روی هوک‌های فارسی. نمره‌ی پایین یعنی یک بار دیگر نگاه کن؛ نمره‌ی بالا قول نیست.
+
+**تشخیص فرمول درباره‌ی کلمه‌هاست، نه نتیجه.** وقتی `/yt-viral` می‌گوید عنوانی از فرمول «آمار» استفاده کرده، این قضاوتی درباره‌ی عنوانی است که می‌بینی، نه ادعایی درباره‌ی دلیل بازدیدهایش.
+
+**`/yt-viral` می‌خواند، اسکرپ نمی‌کند.** فقط فهرست‌های عمومی. هیچ‌وقت با حساب تو وارد نمی‌شود و به رمزهایت دست نمی‌زند.
+
+**تگ‌ها تقریباً اهمیتی ندارند** و این بسته به‌جای فروختن یک تگ‌ساز، همین را صادقانه می‌گوید.
+
+**هیچ عددی ساخته نمی‌شود.** اگر مهارتی عددی بخواهد که ندارد، یا از تو می‌پرسد یا آن جمله را بدون عدد می‌نویسد. `results.py` هم خانه‌ی خالی را خالی می‌گذارد و هیچ عددی را حدس نمی‌زند.
+
+**حکم عرضه و تقاضا به اندازه‌ی داده‌اش درست است.** سئو با نتیجه‌های جستجو و پیشنهادهای خودکاری کار می‌کند که جلوی چشمت است؛ اگر جستجوی یک کلمه نتیجه‌های بی‌ربط می‌دهد (مثلاً «کلاد» ← «گلادیاتور»)، با عبارتی شروع کن که مردم واقعاً جستجو می‌کنند.
+
+**گونه‌های املایی حدس‌اند، نه فهرست کامل.** `keyword.py` غلط‌های رایج را می‌سازد؛ قبل از انتشار، اتوماسیون دایرکت را با چند کامنت واقعی امتحان کن. یک لینک را هم یک‌جا برای همه دایرکت نکن؛ ممکن است حسابت محدود شود.
+
+**زیرنویس را تو تأیید می‌کنی.** `fasubs.py` فقط اصلاح‌های بی‌خطر را خودکار انجام می‌دهد؛ اسم‌ها و اصطلاح‌هایی که از صدا شنیده شده‌اند همیشه برای تأیید تو فهرست می‌شوند.
+
+## تست‌ها
+
+از ریشه‌ی مخزن:
+
+</div>
+
+```bash
+python3 -I -m unittest discover -s tests -t .
+```
+
+<div dir="rtl">
+
+تست‌های فارسی در `tests/fa/` هستند و تست‌های باگ‌های نسخه‌ی اصلی در `tests/upstream/`. اگر `lib/fatext.py` را تغییر دادی، با `python3 -I scripts/sync_lib.py` کپی‌ها را به‌روز کن؛ یک تست بررسی می‌کند همه‌ی کپی‌های `_fatext.py` با اصل یکی باشند.
+
+## قدردانی
+
+این بسته بر پایه‌ی [youtube-agent-skill](https://github.com/Jakeschincariol/youtube-agent-skill) از **Jake Schincariol** ساخته شده است (نسخه‌ی `a2feb21`، مجوز MIT). ایده، ساختار یازده مهارت و منطق ابزارها کار اوست. اینکه چه چیزی حفظ شد و چه چیزی تغییر کرد در [`CREDITS.md`](CREDITS.md) آمده است.
+
+## مجوز
+
+MIT. استفاده کن، تغییرش بده، منتشرش کن؛ فقط متن [`LICENSE`](LICENSE) و هر دو خط کپی‌رایت را نگه دار.
+
+---
+
+**DrMounesi** — یوتیوب [@DrMounesi](https://www.youtube.com/@DrMounesi) — تلگرام [t.me/DrMounesi](https://t.me/DrMounesi)
+
+</div>

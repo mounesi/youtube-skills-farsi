@@ -85,7 +85,9 @@ class RetentionTests(unittest.TestCase):
     # bug 2: seconds axis on a short video read as percent
     def test_short_seconds_axis(self):
         p = self.short90_csv()
-        out = self.jrun(p)
+        # Intentional change (Farsi pack): videos of 3 min or less are Shorts/Reels and their hook
+        # window is the first 3 s, not 30 s. --hook-window 30 keeps this test about the axis fix.
+        out = self.jrun(p, "--hook-window", "30")
         self.assertEqual(out["axis"], "seconds")
         self.assertAlmostEqual(out["hook_leak"], 45.0, places=1)
         self.assertTrue(all(c["at_seconds"] is not None for c in out["cliffs"]))
@@ -100,7 +102,9 @@ class RetentionTests(unittest.TestCase):
         self.assertEqual(self.jrun(p, "--duration", "90")["axis"], "seconds")
         self.assertEqual(self.jrun(p, "--axis", "pct")["axis"], "pct")
         r = run(p, "--json")
-        self.assertIn("assuming", r.stderr)
+        # Intentional change: the axis note is now Farsi («فرض کردم»); it still names --axis.
+        self.assertIn("--axis", r.stderr)
+        self.assertIn("فرض کردم", r.stderr)
 
     # bug 3: slide included cliffs and was a plain mean of rates
     def test_slide_excludes_cliffs(self):
@@ -132,7 +136,9 @@ class RetentionTests(unittest.TestCase):
         for i in range(0, 21):
             s = i * 3
             lines.append(f"{s // 60}:{s % 60:02d},{100 - i * 2}%")
-        out = self.jrun(self.write("mmss.csv", lines))
+        # Intentional change: a 60 s video counts as a Short (3 s hook window); --hook-window 30
+        # keeps the upstream expectation about mm:ss parsing.
+        out = self.jrun(self.write("mmss.csv", lines), "--hook-window", "30")
         self.assertEqual(out["points"], 21)
         self.assertEqual(out["axis"], "seconds")
         self.assertAlmostEqual(out["hook_leak"], 20.0, places=1)

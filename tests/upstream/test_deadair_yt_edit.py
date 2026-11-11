@@ -1,5 +1,11 @@
 """Regression tests for skills/yt-edit/deadair.py (upstream English behaviour).
 
+The Farsi port (build phase) intentionally changed only the human-readable report: its labels are
+now Persian with Persian digits ("dead-air floor 0.1s" -> «آستانه‌ی سکوت ۰٫۱ ثانیه», "2 cues" ->
+«۲ تکه», "80.0% shorter" -> «۸۰٫۰٪ کوتاه‌تر»). The four assertions on that text were updated to the
+same facts in Persian; every bug fix and every --json field checked here is unchanged.
+deadair.load() is still exported (it now wraps _fatext.load_cues), so the loader tests are unchanged.
+
 Run from the repo root:  python3 -I -m unittest discover -s tests -t .
 """
 import importlib.util
@@ -95,7 +101,7 @@ class DeadairTest(unittest.TestCase):
         self.assertAlmostEqual(rep["out"], 1.0)
         self.assertGreaterEqual(rep["out"], 0)
         txt = self.run_tool(p).stdout
-        self.assertIn("80.0% shorter", txt)
+        self.assertIn("۸۰٫۰٪ کوتاه‌تر", txt)  # was "80.0% shorter" (Farsi report)
 
     # 5 + 16: WebVTT cue ids / NOTE blocks
     def test_vtt_cue_ids_not_glued(self):
@@ -205,7 +211,7 @@ class DeadairTest(unittest.TestCase):
 
     def test_floor_equals_form(self):
         r = self.run_tool(self._g(), "--floor=0.1")
-        self.assertIn("dead-air floor 0.1s", r.stdout)
+        self.assertIn("آستانه‌ی سکوت ۰٫۱ ثانیه", r.stdout)  # was "dead-air floor 0.1s"
 
     def test_floor_missing_value_clean_error(self):
         r = self.run_tool(self._g(), "--floor")
@@ -216,7 +222,7 @@ class DeadairTest(unittest.TestCase):
         shutil.copy(self._g(), os.path.join(self.tmp, "2024.10"))
         r = self.run_tool("2024.10")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("2 cues", r.stdout)
+        self.assertIn("۲ تکه", r.stdout)  # was "2 cues" (Farsi report)
 
     def test_negative_floor_rejected(self):
         r = self.run_tool("--floor", "-0.1", self._g())
@@ -225,7 +231,7 @@ class DeadairTest(unittest.TestCase):
 
     def test_floor_space_form_still_works(self):
         r = self.run_tool(self._g(), "--floor", "0.35")
-        self.assertIn("dead-air floor 0.35s", r.stdout)
+        self.assertIn("آستانه‌ی سکوت ۰٫۳۵ ثانیه", r.stdout)  # was "dead-air floor 0.35s"
 
     # 15: uppercase .JSON extension
     def test_uppercase_json_extension(self):

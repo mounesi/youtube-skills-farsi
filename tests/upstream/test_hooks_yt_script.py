@@ -23,7 +23,13 @@ def load_hookscore():
 
 
 def hits(formula, text):
-    return sum(1 for p in formula["match"] if re.search(p, text, re.I))
+    # Changed for the Persian pack: hooks.json patterns now run on the folded text
+    # (no ZWNJ, آ -> ا, ASCII digits; see "match_on" in hooks.json), exactly as hookscore does,
+    # and "example" is the Persian example (the English one is "example_en", tested in tests/fa).
+    return HS.formula_hits(formula, text)
+
+
+HS = load_hookscore()
 
 
 class HooksJsonTest(unittest.TestCase):
