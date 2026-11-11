@@ -28,6 +28,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _fatext as fa  # noqa: E402
@@ -54,13 +55,31 @@ _STOP_FA = frozenset(fa.fold(w) for w in list(fa.STOPWORDS_FA) + """
 بگم بگی بگیم گفتم گفت داشته داشتم داشت باشه باشید باشن باشد بشه بشن بذار بذارید بزن بزنید کن کنی
 بریم بری برید رفتیم سراغ همون همین فقط نباید اول آخر آخرش خوب خوبه بد بیشتر کمتر واقعا اصلا دقیقا
 میشه نمیشه هست نیست بودن بوده میخوام میخوای ببین ببینید بیا بیاید چیز چیزا اینه اونه کنیم کنن
+اگه واسه براتون بهتون برات بهت ازتون باهاتون سلام درود ممنون مرسی درباره دربارهی دربارۀ
+داری دارن کردیم کردم کردی کردید کردن
+میکنم میکنی میکنیم میکنید میکنن میگم میگی میگیم میگه میگن میگیره میگیرم میزنیم میزنم
+میدم میده میدیم میتونی میتونید میتونیم میتونن میخوایم
+بگیرید بگیر بزنیم بزنید بکنید بکنیم بنویسید بنویس
 """.split())
+# Spoken verbs written without the ZWNJ after می/نمی: a known stem plus a personal ending only,
+# so nouns such as میوه or میلیون stay.
+_VERB_NO_ZWNJ = re.compile(r"^ن?می(?:کن|گ|گیر|زن|د|تون|خوا|ر|ش|بین)(?:م|ی|ه|یم|ید|ین|ن|ند)$")
 _STOP_EN = fa.STOPWORDS_EN
 _DIG = "0-9۰-۹٠-٩"
-_TS = r"[%s]{1,2}(?::[%s]{2}){1,2}" % (_DIG, _DIG)
-_LEAD = re.compile(r"^[\s(\[]*(%s)[)\]]?(?:\s*[-–—:|.)•]+\s*|\s+|$)(.*)$" % _TS)
-_TRAIL = re.compile(r"^(.*?)(?:\s*[-–—:|(•]+\s*|\s+)[(\[]?(%s)[)\]]?\s*$" % _TS)
+# A timestamp not followed by more digits or by a decimal/extra field («0:10.5»، «01:05:5»).
+_TS = r"[%s]{1,2}(?::[%s]{2}){1,2}(?![%s]|[:.,٫][%s])" % (_DIG, _DIG, _DIG, _DIG)
+# Optional «- 10:00» range end after the start time: YouTube only reads the start.
+_LEAD = re.compile(r"^[\s(\[]*(%s)[)\]]?(\s*[-–—]\s*%s[)\]]?)?(?:\s*[-–—:|.)•]+\s*|\s+|$)(.*)$"
+                   % (_TS, _TS))
+# A trailing time needs a real separator ( [ - – — | • : before it, not just a space
+# («پخش زنده ساعت ۲۱:۰۰» is not a chapter).
+_TRAIL = re.compile(r"^(.*?)\s*(?:[-–—:|•]+\s*[(\[]?|[(\[])(%s)[)\]]?\s*$" % _TS)
 _BULLET = re.compile(r"^\s*[-–—•*▪●◦]+\s*")
+_ANY_TS = re.compile(r"[%s]{1,2}:[%s]{2}" % (_DIG, _DIG))
+_TS_LIKE_START = re.compile(r"^[\s(\[]*[%s]{1,2}:[%s]" % (_DIG, _DIG))
+_KEYCAP = re.compile("^[0-9#*]️?⃣")
+_LIST_NO = re.compile(r"^(?:#[%s]+[.)\-]?|[%s]+[.)\-])\s+(?=[(\[]?[%s]{1,2}:)" % (_DIG, _DIG, _DIG))
+_JOINERS = "️‍⃣"
 
 
 def fa_num(n):
@@ -80,7 +99,7 @@ def _key(tok):
         if len(f) >= 4 or (tok.isupper() and len(tok) >= 2):   # keep AI, GPT, SEO
             return f
         return None
-    if f in _STOP_FA or fa.is_filler(f):
+    if f in _STOP_FA or fa.is_filler(f) or _VERB_NO_ZWNJ.match(f):
         return None
     if re.match("^(?:ن?می|ن?ب)" + fa.ZWNJ, fa.normalize(tok)):     # verbs: می‌گیره، نمی‌شه
         return None
@@ -124,11 +143,14 @@ def draft(cues, target, dur):
         shift = 1 - (len(kb & ka) / len(kb | ka)) if (kb | ka) else 0
         cand.append((gap * 1.6 + shift * 3.2, cues[i].start, i))
     cand.sort(reverse=True)
+    # Spacing grows with the video, so strong neighbouring boundaries (both edges of one long pause
+    # section) do not use up the target while real topic changes elsewhere are skipped.
+    gap_min = max(MIN_LEN, dur / (target * 2))
     picked = [0.0]
     for _, t, _i in cand:
         if len(picked) >= target:
             break
-        if all(abs(t - p) >= MIN_LEN for p in picked) and dur - t >= MIN_LEN:
+        if all(abs(t - p) >= gap_min for p in picked) and dur - t >= gap_min:
             picked.append(t)
     picked.sort()
     chapters = []
@@ -144,25 +166,69 @@ def draft(cues, target, dur):
 
 # ---------------------------------------------------------------- checking a pasted list
 
-def parse_list(raw):
-    """Lines with a timestamp at the start or the end. Other lines (the rest of a description) are skipped."""
-    items = []
+def _strip_lead_junk(s):
+    """Drop emoji, symbols, punctuation and a list number before a leading timestamp
+    («🎬 0:00»، «1️⃣ 0:00»، «۱. ۰:۰۰»، «#1 0:00»). Returns s unchanged when no timestamp follows."""
+    t = s
+    for _ in range(4):
+        prev = t
+        t = _KEYCAP.sub("", t)
+        i = 0
+        while i < len(t):
+            ch = t[i]
+            if ch in "([":
+                break
+            if ch == "#" and i + 1 < len(t) and re.match("[%s]" % _DIG, t[i + 1]):
+                break                                    # «#1 0:00»: the list number below takes it
+            if ch.isspace() or ch in _JOINERS or unicodedata.category(ch)[0] in "SP":
+                i += 1
+                continue
+            break
+        t = _LIST_NO.sub("", t[i:])
+        if t == prev:
+            break
+    return t if _TS_LIKE_START.match(t) else s
+
+
+def _item(n, ts, title, **extra):
+    d = {"line": n, "raw_ts": ts, "start": fa.parse_timestamp(ts), "title": title.strip(" \t-–—:|•."),
+         "fa_digits": bool(re.search(r"[۰-۹٠-٩]", ts))}
+    d.update(extra)
+    return d
+
+
+def parse_list(raw, skipped=None):
+    """Chapter lines: a timestamp at the start, or (only when no line has one at the start) at the end
+    after a separator, as in «مقدمه (۰۰:۰۰)». Other lines (the rest of a description) are skipped.
+    When `skipped` is a list, the number of every skipped line that still holds a time is appended,
+    so no chapter vanishes without a word."""
+    lead, trail, other = [], [], []
     for n, line in enumerate(raw.splitlines(), 1):
         s = fa.normalize(line).strip()
-        s = _BULLET.sub("", s) if not re.match(r"^\s*[%s]" % _DIG, s) else s
         if not s:
             continue
-        m = _LEAD.match(s)
+        s2 = _strip_lead_junk(s)
+        if s2 == s:
+            s2 = _BULLET.sub("", s) if not re.match(r"^\s*[%s]" % _DIG, s) else s
+        m = _LEAD.match(s2)
         if m:
-            ts, title = m.group(1), m.group(2)
-        else:
-            m = _TRAIL.match(s)
-            if not m:
-                continue
-            title, ts = m.group(1), m.group(2)
-        title = title.strip(" \t-–—:|•.")
-        items.append({"line": n, "raw_ts": ts, "start": fa.parse_timestamp(ts), "title": title,
-                      "fa_digits": bool(re.search(r"[۰-۹٠-٩]", ts))})
+            lead.append(_item(n, m.group(1), m.group(3), range=bool(m.group(2))))
+            continue
+        if _TS_LIKE_START.match(s2):
+            # starts like a time but is not a YouTube one: decimal seconds, one-digit fields, «0:100»
+            tok = re.match(r"^[\s(\[]*([^\s)\]]+)", s2).group(1)
+            lead.append({"line": n, "raw_ts": tok, "start": None, "title": "", "fa_digits": False,
+                         "bad_format": True})
+            continue
+        m = _TRAIL.match(s2)
+        if m:
+            trail.append(_item(n, m.group(2), m.group(1)))
+        elif _ANY_TS.search(s2):
+            other.append(n)
+    items = lead if lead else trail
+    if skipped is not None:
+        dropped = [it["line"] for it in trail] if lead else []
+        skipped.extend(sorted(dropped + other))
     return items
 
 
@@ -174,13 +240,26 @@ def _is_generic(title):
     return f in GENERIC or f in GENERIC_PHRASES
 
 
-def check(items, dur):
-    """Return (chapters, errors, warnings). errors break YouTube's rules; warnings are this pack's advice."""
+def check(items, dur, dur_is_lower_bound=False, skipped=()):
+    """Return (chapters, errors, warnings). errors break YouTube's rules; warnings are this pack's advice.
+    dur_is_lower_bound: dur is where the subtitles end, not the video (music or an end screen may follow),
+    so a last chapter past it or too close to it is only a warning."""
     errors, warnings = [], []
     bad = [it for it in items if it["start"] is None]
     for it in bad:
-        errors.append("خط %s: زمان «%s» خوانا نیست (ثانیه و دقیقه باید زیر ۶۰ باشند)."
-                      % (fa_num(it["line"]), it["raw_ts"]))
+        if it.get("bad_format"):
+            errors.append("خط %s: «%s» شکل زمان فصل یوتیوب نیست؛ ثانیه دو رقم و بدون ممیز باشد"
+                          " (مثل 0:10 یا 1:05:05)." % (fa_num(it["line"]), it["raw_ts"]))
+        else:
+            errors.append("خط %s: زمان «%s» خوانا نیست (ثانیه و دقیقه باید زیر ۶۰ باشند)."
+                          % (fa_num(it["line"]), it["raw_ts"]))
+    for n in skipped:
+        warnings.append("خط %s زمان دارد ولی فصل حساب نشد؛ اگر فصل است، زمان را اول خط بنویس («0:00 عنوان»)."
+                        % fa_num(n))
+    for it in items:
+        if it.get("range"):
+            warnings.append("خط %s بازه‌ی زمانی دارد؛ یوتیوب فقط زمان شروع را می‌خواند، پس زمان پایان حذف شد."
+                            % fa_num(it["line"]))
     good = [it for it in items if it["start"] is not None]
     if not items:
         errors.append("هیچ خطی با زمان پیدا نشد. هر فصل یک خط است: «0:00 عنوان».")
@@ -203,6 +282,12 @@ def check(items, dur):
         elif nxt is not None and secs < MIN_LEN:
             errors.append("فصل %s («%s») فقط %s ثانیه است؛ هر فصل دست‌کم ۱۰ ثانیه می‌خواهد."
                           % (label, it["title"] or "بی‌عنوان", fa_num(int(secs))))
+        elif nxt is None and dur is not None and dur_is_lower_bound:
+            if secs < MIN_LEN:
+                chapters[-1]["seconds"] = None        # unknown: the video may run on after the subtitles
+                warnings.append("فصل آخر (%s) نزدیک یا بعد از پایان زیرنویس است. زیرنویس در %s تمام می‌شود؛"
+                                " اگر ویدیو بلندتر است (موسیقی یا اسکرین پایانی)، با --duration طول واقعی را"
+                                " بده تا فصل آخر سنجیده شود." % (label, fa.fmt_timestamp(dur)))
         elif nxt is None and dur is not None:
             if it["start"] >= dur:
                 errors.append("فصل آخر (%s) بعد از پایان ویدیو (%s) شروع می‌شود."
@@ -242,13 +327,22 @@ class FaParser(argparse.ArgumentParser):
 
 
 def read_cues(path):
+    """Return (sorted cues, None), or (None, a Farsi error) when the file is unreadable or has no timed lines."""
     try:
         cues = fa.load_cues(path)
-    except (OSError, UnicodeDecodeError) as e:
-        sys.stderr.write("فایل زیرنویس خوانده نشد: %s (%s)\n" % (path, e))
-        print(__doc__)
-        sys.exit(1)
-    return sorted(cues, key=lambda c: (c.start, c.end))
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        return None, "فایل زیرنویس خوانده نشد: %s (%s)" % (path, e)
+    if not cues:
+        return None, "فایل زیرنویس هیچ خط زمان‌داری ندارد یا خراب است: %s" % path
+    return sorted(cues, key=lambda c: (c.start, c.end)), None
+
+
+def bad_input(args, message, rc=2):
+    """Bad input: the message goes to stderr; with --json stdout still holds JSON."""
+    sys.stderr.write(message + "\n")
+    if args.json:
+        print(json.dumps({"valid": False, "error": message}, ensure_ascii=False, indent=1))
+    return rc
 
 
 def block(chapters, key):
@@ -278,15 +372,15 @@ def main():
     if args.check:
         return run_check(args, dur)
 
-    if not args.path or not os.path.isfile(args.path):
-        if args.path:
-            sys.stderr.write("فایل پیدا نشد: %s\n" % args.path)
-        print(__doc__)
-        return 1
-    cues = read_cues(args.path)
+    if not args.path:
+        return bad_input(args, "فایل زیرنویس را بده.\nروش اجرا:\n  %s" % USAGE)
+    if not os.path.isfile(args.path):
+        return bad_input(args, "فایل پیدا نشد: %s" % args.path)
+    cues, err = read_cues(args.path)
+    if err:
+        return bad_input(args, err)
     if len(cues) < 6:
-        print("زیرنویس برای فصل‌بندی خیلی کوتاه است (کمتر از ۶ خط).")
-        return 1
+        return bad_input(args, "زیرنویس برای فصل‌بندی خیلی کوتاه است (کمتر از ۶ خط).")
     end = fa.duration(cues)
     note = None
     if dur is not None:
@@ -327,18 +421,24 @@ def run_check(args, dur):
             with open(args.check, encoding="utf-8-sig") as f:
                 raw = f.read()
         except (OSError, UnicodeDecodeError) as e:
-            sys.stderr.write("فهرست فصل‌ها خوانده نشد: %s (%s)\n" % (args.check, e))
-            return 2
+            return bad_input(args, "فهرست فصل‌ها خوانده نشد: %s (%s)" % (args.check, e))
+    src = "flag" if dur is not None else None
     if dur is None and args.path:
         if not os.path.isfile(args.path):
-            sys.stderr.write("فایل زیرنویس پیدا نشد: %s\n" % args.path)
-            return 2
-        cues = read_cues(args.path)
+            return bad_input(args, "فایل زیرنویس پیدا نشد: %s" % args.path)
+        cues, err = read_cues(args.path)
+        if err:
+            return bad_input(args, err)
         dur = fa.duration(cues) or None
-    chapters, errors, warnings = check(parse_list(raw), dur)
+        src = "transcript" if dur is not None else None
+    skipped = []
+    items = parse_list(raw, skipped)
+    chapters, errors, warnings = check(items, dur, dur_is_lower_bound=(src == "transcript"),
+                                       skipped=skipped)
     ok = not errors
     if args.json:
-        print(json.dumps({"valid": ok, "duration": dur, "last_checked": dur is not None,
+        print(json.dumps({"valid": ok, "duration": dur, "duration_source": src,
+                          "last_checked": src == "flag",
                           "chapters": chapters, "errors": errors, "warnings": warnings},
                          ensure_ascii=False, indent=1))
         return 0 if ok else 1

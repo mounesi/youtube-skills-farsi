@@ -84,6 +84,25 @@ class HooksJsonTest(unittest.TestCase):
         self.assertEqual(hs.classify("تا شش دقیقه‌ی دیگه یه اسکریپت داری.")[0], "The Clock")
         self.assertEqual(hs.classify("۴۰٪ بیننده‌ها اینجا می‌رن")[0], "The Statistic")
 
+    def _id(self, text):
+        best = hs.classify_formula(text)[0]
+        return best["id"] if best else None
+
+    def test_wasted_effort_and_nobody_tells_you_are_not_contrarian(self):
+        self.assertIn(self._id(STRONG_FA), {"the-mistake", "the-insider"})
+        self.assertEqual(self._id("داری وقتت رو هدر میدی."), "the-mistake")
+        self.assertNotEqual(self._id("ولی من فهمیدم چرا."), "contrarian-flip")
+        self.assertIn(self._id("You waste 3 hours a week on titles and nobody tells you why?"),
+                      {"the-mistake", "the-insider"})
+        # a real flip (common advice, then "but I") stays Contrarian Flip
+        self.assertEqual(self._id("همه می‌گن تایتل مهمه، ولی من فهمیدم این‌طور نیست."), "contrarian-flip")
+
+    def test_reveal_and_clock_on_common_phrasing(self):
+        self.assertEqual(self._id("تو این ویدیو بهت نشون میدم چطور."), "the-reveal")
+        self.assertNotEqual(self._id("چرا هنوز این مشکل رو داری؟"), "the-clock")
+        self.assertIsNone(self._id("احتمالا تو هم همین مشکل رو داری."))
+        self.assertEqual(self._id("تا آخر این ویدیو یه تامبنیل بهتر داری."), "the-clock")
+
 
 class HookscoreTest(unittest.TestCase):
     def test_strong_persian_hook_scores_far_above_upstream(self):
@@ -155,19 +174,102 @@ class HookscoreTest(unittest.TestCase):
         self.assertEqual(hs.band_words("Why do channels die?"), (9, 24))
 
 
+class HookscoreCalibrationTest(unittest.TestCase):
+    """A hook that matches a formula is judged on the properties that formula is built on."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(SKILL, "hooks.json"), encoding="utf-8") as f:
+            cls.hooks = json.load(f)["hooks"]
+
+    def _share_workable(self, key):
+        ok = [h["id"] for h in self.hooks if hs.band(hs.score(h[key])[1]) in ("WORKABLE", "STRONG")]
+        return len(ok) / len(self.hooks), ok
+
+    def test_model_examples_are_not_all_weak(self):
+        share, ok = self._share_workable("example")
+        self.assertGreaterEqual(share, 0.8, ok)
+        # English stays on the upstream lexicon, which does not read spelled numbers («a year»,
+        # «four times», «thirty»), so a few statement examples still land under the line
+        share, ok = self._share_workable("example_en")
+        self.assertGreaterEqual(share, 0.7, ok)
+
+    def test_summaries_and_filler_stay_weak(self):
+        for t in (WEAK_FA, "این ویدیو درباره‌ی هوش مصنوعیه.",
+                  "امروز می‌خوایم درباره‌ی ادیت ویدیو صحبت کنیم.",
+                  "تو این ویدیو درباره‌ی پنج ابزار هوش مصنوعی حرف می‌زنیم."):
+            r = hs.result(t)
+            self.assertEqual(r["band"], "WEAK", r)
+            self.assertIsNone(r["formula_id"], t)
+            self.assertEqual(len(r["counted"]), 5)
+
+    def test_statement_hook_is_not_told_to_ask_a_question(self):
+        stat = [h for h in self.hooks if h["id"] == "the-statistic"][0]["example"]
+        r = hs.result(stat)
+        self.assertNotIn("CURIOSITY", r["counted"])
+        self.assertNotEqual(r["weakest"], "CURIOSITY")
+        self.assertNotIn("سؤال باز", r["advice"])
+
+
+class HookscoreFixesTest(unittest.TestCase):
+    def test_in_before_a_time_or_number_is_not_you(self):
+        self.assertEqual(hs.address("من تو ۳۰ روز"), hs.address("من ۳۰ روز"))
+        self.assertEqual(hs.address_fa("من تو 30 روز"), 0)
+        for t in ("تو ۲۰ دقیقه یه اپ می‌سازیم", "تو بیست دقیقه یه اپ می‌سازیم", "تو یه هفته",
+                  "تو چند ساعت تموم شد", "تو هر ویدیو یه اشتباه هست"):
+            self.assertEqual(hs.address_fa(t), 0, t)
+        with open(os.path.join(SKILL, "hooks.json"), encoding="utf-8") as f:
+            hooks = json.load(f)["hooks"]
+        other = [h for h in hooks if h["id"] == "someone-elses-result"][0]["example"]
+        self.assertEqual(hs.address_fa(other), 0)
+        self.assertEqual(hs.address(other), 26)
+        # 2nd-person sentences keep the verb: «تو سه روز می‌تونی»
+        self.assertEqual(hs.address_fa("تو سه روز می‌تونی"), 1)
+
+    def test_mi_nouns_are_not_verbs(self):
+        self.assertEqual(hs.address_fa("یه درآمد میلیونی"), 0)
+        self.assertEqual(hs.address_fa("یه درآمد میلیاردی"), 0)
+        self.assertEqual(hs.address_fa("میزبانی سایت"), 0)
+        self.assertEqual(hs.address_fa("یه ابزار مینی"), 0)
+        self.assertEqual(hs.address_fa("می‌دونی چرا"), 1)
+        self.assertEqual(hs.address_fa("میدونی چرا"), 1)  # typed without ZWNJ
+
+    def test_object_clitic_compound_imperatives_and_more_nouns(self):
+        for t in ("نشونت می‌دم این پرامپت چیکار می‌کنه", "اپت رو با این پرامپت نجات بده",
+                  "این پرامپت رو کپی کن"):
+            self.assertGreater(hs.address(t), 26, t)
+        self.assertEqual(hs.address_fa("این بده"), 0)          # "this is bad"
+        self.assertEqual(hs.address_fa("وقت رو هدر نده"), 0)   # «وقت» is not «وقت» + «ت»
+
+    def test_digit_plus_scale_word_is_one_number(self):
+        for t in ("۱۰ هزار فالوور", "ده هزار فالوور", "10000 فالوور", "۱۲٬۰۰۰ تومن", "۲۰۰ هزار تومن"):
+            self.assertEqual(hs._concrete_count(t), (1, 0), t)
+        self.assertEqual(hs.specificity("۱۰ هزار فالوور"), hs.specificity("ده هزار فالوور"))
+        self.assertEqual(hs._concrete_count("۳ساعت"), hs._concrete_count("۳ ساعت"))
+
+    def test_long_line_is_linear(self):
+        import time
+        start = time.time()
+        hs.result("قبل " * 20000)
+        self.assertLess(time.time() - start, 5)
+
+
 class HookscoreCliTest(unittest.TestCase):
     def test_json_has_farsi_fields(self):
         r = run(HOOKSCORE, "--json", os.path.join(FIX, "hooks_fa.txt"))
         self.assertEqual(r.returncode, 0, r.stderr)
         out = json.loads(r.stdout)
         self.assertEqual(len(out), 5)
-        self.assertEqual(out[0]["hook"], STRONG_FA)  # ranked first
+        # STRONG_FA, the Direct Address model example and the English Statistic-style question are all
+        # strong; which one tops the list depends on each formula's properties, so check the band
+        strong = [x for x in out if x["hook"] == STRONG_FA][0]
+        self.assertEqual(strong["band_fa"], "قوی")
         self.assertEqual(out[0]["band_fa"], "قوی")
         weak = [x for x in out if x["hook"] == WEAK_FA][0]
         self.assertEqual(weak["band_fa"], "ضعیف")
         self.assertEqual(weak["formula_fa"], "بی‌فرمول")
         self.assertEqual(set(out[0]["properties_fa"]), {"دقت", "خطاب", "ریسک", "کنجکاوی", "کوتاهی"})
-        self.assertTrue(fa.is_persian(out[0]["advice"]))
+        self.assertTrue(fa.is_persian(strong["advice"]))
         en = [x for x in out if x["lang"] == "en"][0]
         self.assertEqual(en["formula"], "The Question")
 
@@ -177,7 +279,7 @@ class HookscoreCliTest(unittest.TestCase):
         for label in ("دقت", "خطاب", "ریسک", "کنجکاوی", "کوتاهی", "حکم", "قوی", "ضعیف", "فرمول",
                       "ضعیف‌ترین", "برنده:", "کلمه در ثانیه"):
             self.assertIn(label, r.stdout)
-        self.assertIn("۷۴", r.stdout)  # Persian digits in the report
+        self.assertIn(fa.to_fa_digits(str(hs.score(STRONG_FA)[1])), r.stdout)  # Persian digits in the report
         self.assertNotIn("VERDICT", r.stdout)
 
     def test_bom_crlf_and_indent(self):
@@ -197,7 +299,24 @@ class HookscoreCliTest(unittest.TestCase):
             p = os.path.join(d, "empty.txt")
             open(p, "w").close()
             self.assertEqual(run(HOOKSCORE, p).returncode, 2)
-            self.assertEqual(run(HOOKSCORE, d).returncode, 2)
+            r = run(HOOKSCORE, d)
+            self.assertEqual(r.returncode, 2)
+            self.assertIn("پوشه", r.stderr)  # a folder, not "file not found"
+            self.assertNotIn("پیدا نشد", r.stderr)
+        for args in (["--hook", "یه خط", "اضافه"], [os.path.join(FIX, "hooks_fa.txt"), "b.txt"]):
+            r = run(HOOKSCORE, *args)
+            self.assertEqual(r.returncode, 2, args)
+            self.assertIn("آرگومان اضافه", r.stderr)
+            self.assertEqual(r.stdout, "")
+
+    def test_paragraph_line_warns(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "long.txt")
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("کلمه " * 80 + "\n")
+            r = run(HOOKSCORE, "--json", p)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("پاراگراف", r.stderr)
 
 
 class RuntimeTest(unittest.TestCase):
@@ -271,6 +390,23 @@ class RuntimeTest(unittest.TestCase):
         self.assertIn("خانه‌ی", kinds["اضافه"][0]["fix"])
         # clean Persian text has nothing to fix; «که» without a mark is fine
         self.assertEqual(rt.tts_issues("کامنت کن که برات بفرستم، به خانه‌ی اول برگرد."), [])
+
+    def test_tts_hyphen_is_not_minus(self):
+        issues = rt.tts_issues("تو ۲۰-۳۰ دقیقه با Claude 3.5 و GPT-4o و GPT-5 کار کن.")
+        self.assertIn(("بازه", "۲۰-۳۰", "بیست تا سی"), issues)
+        self.assertFalse([x for x in issues if "منفی" in x[2]], issues)
+        found = [x[1] for x in issues]
+        self.assertIn("GPT-4o", found)
+        self.assertIn("GPT-5", found)
+        # the digits inside a Latin name get no separate «عدد» line
+        self.assertFalse([x for x in issues if x[0] == "عدد" and x[1] in ("4", "-4", "5", "-5")], issues)
+        self.assertIn(("بازه", "2–3", "دو تا سه"), rt.tts_issues("2–3 ساعت"))
+        # a real negative number is still read as one
+        self.assertIn(("عدد", "-3", "منفی سه"), rt.tts_issues("دما -3 درجه شد"))
+        # a date is not a range
+        self.assertFalse([x for x in rt.tts_issues("۱۴۰۳-۰۸-۲۰") if x[0] == "بازه"])
+        # the word count is unchanged: «۲۰-۳۰» = «بیست» + «سی»
+        self.assertEqual(rt.spoken_words("۲۰-۳۰"), 2)
 
     def test_cli(self):
         r = run(RUNTIME, os.path.join(FIX, "tts_fa.md"), "--tts", "--speed", "۱٫۲")

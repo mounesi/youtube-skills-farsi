@@ -51,7 +51,10 @@ class PersianTitleTests(unittest.TestCase):
     def test_length_thresholds(self):
         base = "آموزش ساخت ریلز با هوش مصنوعی در ۱۰ دقیقه"
         self.assertNotIn("length", kinds(self.t.check(base)))
-        self.assertIn("mobile", kinds(self.t.check(base)))
+        # over 40 characters: a mobile preview note, not a scored issue (60-70 is the target)
+        r = self.t.check(base)
+        self.assertNotIn("mobile", kinds(r))
+        self.assertTrue(any("فید موبایل" in n for n in r["notes"]))
         r = self.t.check(base + " برای کسانی که تازه شروع کرده‌اند")
         self.assertIn("length", kinds(r))
         r = self.t.check("ا" * 101)
@@ -159,6 +162,163 @@ class PersianTitleTests(unittest.TestCase):
         self.assertFalse(r["persian"])
         self.assertIsNone(r["back_translation"])
         self.assertNotIn("no-number", kinds(self.t.check("I tried Claude for a week")))
+
+
+class ReviewFixTests(unittest.TestCase):
+    """Regressions from the review of title.py (scoring, matching, markers, input)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.t = load()
+
+    def test_issue_never_ties_with_clean_title(self):
+        kw = dict(keyword="کلاد کد")
+        clean = self.t.check("کلاد کد ابزار جدید ۱۴۰۵ در فروردین", "رایگان شد", **kw)
+        vague = self.t.check("کلاد کد بهترین ابزار ۱۴۰۵ در فروردین", "رایگان شد", **kw)
+        dup = self.t.check("کلاد کد ابزار رایگان ۱۴۰۵ در فروردین", "رایگان شد", **kw)
+        self.assertEqual(clean["issues"], [])
+        self.assertIn("vague", kinds(vague))
+        self.assertIn("duplicate", kinds(dup))
+        for r in (vague, dup):
+            self.assertLess(r["score"], 100)
+            self.assertGreater(clean["score"], r["score"])
+        r = self.t.check("دکتر رضایی: آینده هوش مصنوعی در ۱۴۰۵", guest="دکتر رضایی")
+        self.assertLessEqual(r["score"], 100 - 14 + 3)
+
+    def test_file_ranking_puts_clean_title_first(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = os.path.join(d, "t.txt")
+            with open(f, "w", encoding="utf-8") as fh:
+                fh.write("کلاد کد بهترین ابزار ۱۴۰۵ در فروردین\nکلاد کد ابزار رایگان ۱۴۰۵ در فروردین\n"
+                         "کلاد کد ابزار جدید ۱۴۰۵ در فروردین\n")
+            p = run(f, "--keyword", "کلاد کد", "--thumb", "رایگان شد", "--json")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            rows = json.loads(p.stdout)
+            self.assertEqual(rows[0]["title"], "کلاد کد ابزار جدید ۱۴۰۵ در فروردین")
+            self.assertTrue(all(r["score"] < 100 for r in rows[1:]))
+
+    def test_mobile_issue_only_when_keyword_is_cut(self):
+        t = "آموزش ساخت ریلز با هوش مصنوعی برای همه کلاد کد"
+        self.assertIn("mobile", kinds(self.t.check(t, keyword="کلاد کد")))
+        t = "ساخت اپ با کلاد کد روی گوشی بدون برنامه‌نویسی در ۳۰ دقیقه"
+        self.assertNotIn("mobile", kinds(self.t.check(t, keyword="ساخت اپ")))
+
+    def test_back_translation_whole_tokens(self):
+        r = self.t.check("آموزش AI در ۱۰ دقیقه برای مبتدی‌ها", en="A training on maintenance in 100 minutes")
+        self.assertIn("AI", r["back_translation"]["missing"])
+        self.assertIn("۱۰", r["back_translation"]["missing"])
+        r = self.t.check("ساخت اپ با GPT در ۳۰ دقیقه", en="Build an app with ChatGPT in 30 minutes")
+        self.assertIn("GPT", r["back_translation"]["missing"])
+        r = self.t.check("آموزش Claude در ۳۰ دقیقه", en="Claude's tutorial in 30 minutes")
+        self.assertEqual(r["back_translation"]["missing"], [])
+
+    def test_latin_brand_runs_keep_title_persian(self):
+        for title in ("Claude Code در برابر Cursor", "مقایسه Claude Code و Cursor AI", "آموزش Claude Code"):
+            r = self.t.check(title)
+            self.assertTrue(r["persian"], title)
+            self.assertNotIn("no-number", kinds(r), title)
+            self.assertTrue(any("Claude Code" in g for g in r["good"]), title)
+        self.assertFalse(self.t.check("Claude Code vs Cursor in 2026").get("persian"))
+
+    def test_yek_as_article_is_not_a_number(self):
+        self.assertIn("no-number", kinds(self.t.check("یک ترفند ساده برای نوشتن ایمیل")))
+        self.assertIn("no-number", kinds(self.t.check("بدون یک خط کد ساخت اپ آموزشی")))
+        for title in ("یک روز با ChatGPT", "بیست و یک ابزار برای کار", "یک میلیون بازدید در ماه",
+                      "۱ میلیون بازدید در ماه"):
+            self.assertNotIn("no-number", kinds(self.t.check(title)), title)
+
+    def test_persian_letter_brand_is_a_name(self):
+        r = self.t.check("ساخت اپ با کلاد بدون برنامه‌نویسی، روی گوشی خودت")
+        self.assertNotIn("no-number", kinds(r))
+
+    def test_brand_tail_markers(self):
+        for title in ("ساختن اپ با هوش مصنوعی | قسمت ۳ | DrMounesi",
+                      "ساخت اپ در ۵ دقیقه | AI with AL | DrMounesi",
+                      "۵ کار ضروری برای فصل امتحانات | DrMounesi",
+                      "The hardest part of learning AI | DrMounesi"):
+            r = self.t.check(title)
+            self.assertNotIn("brand-last", kinds(r), title)
+            self.assertNotIn("episode-first", kinds(r), title)
+        r = self.t.check("قسمت ۳: ساختن اپ با هوش مصنوعی | DrMounesi")
+        self.assertEqual([k for k in kinds(r) if k in ("brand-last", "episode-first")], ["episode-first"])
+        self.assertIn("برند/شماره‌ی قسمت آخر عنوان است", r["good"])
+        for title in ("قسمت ۳: موضوع هوش مصنوعی", "قسمت ۳: هوش مصنوعی شغلت رو می‌گیره؟",
+                      "قسمت ۳ - هوش مصنوعی شغلت رو می‌گیره؟"):
+            r = self.t.check(title)
+            self.assertIn("episode-first", kinds(r), title)
+            self.assertNotIn("برند/شماره‌ی قسمت آخر عنوان است", r["good"], title)
+        self.assertIn("episode-first", kinds(self.t.check("قسمت ۵: کلاد کد")))
+        self.assertNotIn("episode-first", kinds(self.t.check("فصل امتحانات با هوش مصنوعی در ۱۰ روز")))
+        _, markers = self.t.brand_markers("کلاد کد | قسمت ۵ | DrMounesi", self.t.DEFAULT_BRANDS)
+        self.assertIn((1, "قسمت"), markers)
+
+    def test_guest_opener_with_guest_flag(self):
+        r = self.t.check("گفتگو با دکتر رضایی درباره آینده هوش مصنوعی", guest="رضایی")
+        self.assertIn("guest-first", kinds(r))
+        self.assertEqual(kinds(r).count("guest-first"), 1)
+
+    def test_whole_word_prefix_match(self):
+        self.assertEqual(self.t.find_seq(self.t.toks("Airbnb hacks"), self.t.toks("AI")), -1)
+        r = self.t.check("علیرضا رفیعی از آینده هوش مصنوعی می‌گوید", guest="علی")
+        self.assertNotIn("guest-first", kinds(r))
+        self.assertEqual(self.t.find_seq(self.t.toks("آموزش کلاد کدهای"), self.t.toks("کلاد کد")), 1)
+        self.assertEqual(self.t.find_seq(self.t.toks("Claude's tips"), self.t.toks("Claude")), 0)
+
+    def test_inflected_vague_words(self):
+        for title in ("یک ترفند فوق‌العاده‌ای برای ساخت اپ", "این ابزار هوش مصنوعی خیلی خفنه",
+                      "عالیه! ساخت اپ با هوش مصنوعی", "بهترین‌ها: ابزارهای هوش مصنوعی سال"):
+            self.assertIn("vague", kinds(self.t.check(title)), title)
+        for title in ("آموزش کامل پایتون در ۱۰ روز", "نهایی‌سازی پروژه با پایتون در ۱۰ روز",
+                      "جادوی پایتون در ۵ دقیقه"):
+            self.assertNotIn("vague", kinds(self.t.check(title)), title)
+
+    def test_emoji_clusters(self):
+        base = "ساخت اپ با Claude در ۱۰ دقیقه "
+        self.assertNotIn("spam", kinds(self.t.check(base + "❤️❤️")))
+        self.assertNotIn("spam", kinds(self.t.check(base + "🇮🇷🔥")))
+        self.assertIn("۳ شکلک", dict(self.t.check(base + "❤️❤️❤️")["issues"])["spam"])
+
+    def test_latin_thumb_on_persian_title(self):
+        r = self.t.check("ساخت اپ با هوش مصنوعی در ۳۰ دقیقه", thumb="NO CODE")
+        self.assertTrue(any("لاتین روی تامبنیل" in n for n in r["notes"]))
+        r = self.t.check("ساخت اپ با هوش مصنوعی در ۳۰ دقیقه", thumb="DrMounesi")
+        self.assertFalse(any("لاتین روی تامبنیل" in n for n in r["notes"]))
+
+    def test_invisible_or_punctuation_only_title_rejected(self):
+        for t in ("\u200f\u200e", "\u200c\u200c", "\ufeff", "!!!؟؟"):
+            p = run("--title", t)
+            self.assertEqual(p.returncode, 1, repr(t))
+            self.assertIn("خالی", p.stderr)
+
+    def test_invisible_lines_and_rlm_comment_skipped(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = os.path.join(d, "t.txt")
+            with open(f, "w", encoding="utf-8") as fh:
+                fh.write("\u200c\n\u200f# یادداشت من\nکلاد کد در ۱۰ دقیقه\n")
+            p = run(f, "--json")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual([r["title"] for r in json.loads(p.stdout)], ["کلاد کد در ۱۰ دقیقه"])
+
+    def test_file_and_title_together_is_an_error(self):
+        p = run(os.path.join(FIX, "titles_fa.txt"), "--title", "عنوان دیگر ۵")
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("نه هر دو", p.stderr)
+
+    def test_directory_gives_clear_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = run(d)
+            self.assertEqual(p.returncode, 1)
+            self.assertIn("فایل معمولی نیست", p.stderr)
+
+    def test_non_utf8_locale_no_traceback(self):
+        env = {k: v for k, v in os.environ.items() if k not in ("PYTHONIOENCODING", "PYTHONUTF8")}
+        for loc in ("C", "en_US.ISO8859-1"):
+            env.update(LC_ALL=loc, LANG=loc)
+            p = subprocess.run([sys.executable, "-I", TOOL, "--title", "abc 5"], capture_output=True,
+                               timeout=30, env=env)
+            self.assertEqual(p.returncode, 0, (loc, p.stderr))
+            self.assertNotIn(b"Traceback", p.stderr, loc)
+            self.assertIn("۵".encode("utf-8"), p.stdout, loc)
 
 
 class CliTests(unittest.TestCase):

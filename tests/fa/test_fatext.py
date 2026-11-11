@@ -102,6 +102,11 @@ class TestParseNumber(unittest.TestCase):
         ("1.5 million", 1.5e6), ("بازدید: ۸۵۰", 850), ("12 هزارتا", 12000), ("۳ میلیونی", 3e6),
         ("یک و نیم میلیون", 1.5e6), ("سیصد هزار بازدید", 3e5), ("هزار", 1000), ("حدود دویست هزار", 2e5),
         ("بیست و پنج", 25), (1200, 1200), (3.5, 3.5),
+        # spelled half: «نیم» before a scale is half of it, «… و نیم» after a scale is half of that scale
+        ("نیم میلیون", 5e5), ("دو میلیون و نیم", 2.5e6), ("سه هزار و نیم", 3500), ("هزار و نیم", 1500),
+        ("دو و نیم", 2.5), ("دو میلیون و سیصد هزار", 2.3e6),
+        # leading decimal separator
+        (".5k", 500), ("٫۵", 0.5), ("٫۵ میلیون", 5e5), ("-.5", -0.5),
     ]
 
     def test_forms(self):
@@ -119,10 +124,55 @@ class TestParseNumber(unittest.TestCase):
         self.assertEqual(fa.parse_number("۵ کانال"), 5.0)
         self.assertEqual(fa.parse_number("3 books"), 3.0)
 
+    def test_single_letter_suffix_must_touch(self):
+        self.assertEqual(fa.parse_number("4.5M"), 4.5e6)
+        self.assertEqual(fa.parse_number("1.2B"), 1.2e9)
+        self.assertEqual(fa.parse_number("2m"), 2e6)
+        self.assertEqual(fa.parse_number("5 m"), 5.0)  # "m" may be minutes or metres
+        self.assertEqual(fa.parse_number("5 b"), 5.0)
+        self.assertEqual(fa.parse_number("1.5 million"), 1.5e6)
+        self.assertEqual(fa.parse_number("a.5"), 5.0)  # a dot glued to a word is not a decimal point
+
+    def test_not_finite(self):
+        self.assertIsNone(fa.parse_number(float("inf")))
+        self.assertIsNone(fa.parse_number(float("nan")))
+
     def test_hyphen_inside_text_not_negative(self):
         self.assertEqual(fa.parse_number("1080-1920"), 1080.0)
         self.assertEqual(fa.parse_number("x-3"), 3.0)
 
+
+
+class TestParseNumberStrict(unittest.TestCase):
+    """strict=True: the whole text must be one number; nothing is dropped silently."""
+    OK = [
+        ("۱۲ هزار و ۵۰۰ بازدید", 12500), ("۲ میلیون و ۳۰۰ هزار", 2.3e6), ("۱۲٬۴۰۰", 12400),
+        ("12.4K", 12400), ("۱/۵ میلیون", 1.5e6), ("سیصد هزار", 3e5), ("۸۷٪", 87), ("٪۴۵", 45),
+        ("حدود ۱۲ هزار بازدید", 12000), ("بیش از ۱۰ هزار", 1e4), ("−۳", -3), ("12 هزارتا", 12000),
+        ("۳ میلیونی", 3e6), ("10 کا", 1e4), ("1.5 million", 1.5e6), ("۱۲" + ZWNJ + "هزار", 12000),
+        ("نیم میلیون", 5e5), ("دو میلیون و نیم", 2.5e6), ("یک و نیم میلیون", 1.5e6),
+        ("صد و بیست و پنج", 125), ("هزار", 1000), (".5k", 500), ("٫۵", 0.5), ("4.5M", 4.5e6), (95, 95),
+    ]
+    BAD = [
+        "بین 5 تا 8 هزار", "12K-15K", "زیاد 5", "ساعت 8:30", "8:30", "2026-11-11", "3/4 of viewers",
+        "۵ هزار و ۳ میلیون", "5 8", "12 و 5", "هزار و ۲۰۰۰", "و ۵", "۵ و", "دو میلیون سیصد هزار", "5 m",
+        "1,2,3", "۱۴۰۳/۰۸/۲۰", "abc", "", None, "نه", "یه", "ده", "نیم", "بازدید",
+    ]
+
+    def test_ok(self):
+        for s, want in self.OK:
+            with self.subTest(s=s):
+                self.assertAlmostEqual(fa.parse_number(s, strict=True), float(want))
+
+    def test_rejected(self):
+        for s in self.BAD:
+            with self.subTest(s=s):
+                self.assertIsNone(fa.parse_number(s, strict=True))
+
+    def test_lenient_default_unchanged(self):
+        self.assertEqual(fa.parse_number("زیاد 5"), 5.0)
+        self.assertEqual(fa.parse_number("بازدید: ۸۵۰"), 850.0)
+        self.assertIsNone(fa.parse_number("بازدید: ۸۵۰", strict=True))
 
 class TestTokenize(unittest.TestCase):
     def test_persian_zwnj_kept(self):
@@ -313,6 +363,78 @@ class TestCues(unittest.TestCase):
         cues = [fa.Cue(0, 30, "a"), fa.Cue(5, 6, "b")]
         self.assertEqual(fa.duration(cues), 30)
         self.assertEqual(fa.duration([]), 0.0)
+
+    def test_plain_vtt_keeps_repeated_single_lines(self):
+        raw = ("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nسلام\n\n00:00:03.100 --> 00:00:05.000\nآره\n\n"
+               "00:00:05.100 --> 00:00:07.000\nآره\n\n00:00:07.000 --> 00:00:08.000\n[موسیقی]\n\n"
+               "00:00:08.000 --> 00:00:09.000\n[موسیقی]\n")
+        p = self.write("rep.vtt", raw)
+        self.assertEqual([c.text for c in fa.load_cues(p)], ["سلام", "آره", "آره", "[موسیقی]", "[موسیقی]"])
+
+    def test_youtube_auto_vtt_still_dedupes(self):
+        raw = ("WEBVTT\nKind: captions\n\n"
+               "00:00:00.000 --> 00:00:02.000\nسلام<00:00:00.500><c> دوستان</c>\n\n"
+               "00:00:02.000 --> 00:00:02.010\nسلام دوستان\n\n"
+               "00:00:02.010 --> 00:00:04.000\nسلام دوستان\nامروز<00:00:02.500><c> بریم</c>\n\n"
+               "00:00:04.000 --> 00:00:06.000\nامروز بریم\n")
+        self.assertEqual([c.text for c in fa.parse_cues(raw)], ["سلام دوستان", "امروز بریم"])
+
+    def test_utf16_srt(self):
+        raw = "1\n00:00:00,000 --> 00:00:02,000\nسلام دوستان\n\n2\n00:00:03,000 --> 00:00:04,000\nبریم\n"
+        for enc in ("utf-16", "utf-16-le", "utf-16-be"):
+            with self.subTest(enc=enc):
+                p = self.write("u16-%s.srt" % enc, raw.encode(enc))
+                self.assertEqual([c.text for c in fa.load_cues(p)], ["سلام دوستان", "بریم"])
+
+    def test_cp1256_srt(self):
+        # Persian ی (U+06CC) is not in cp1256; old Windows files carry Arabic ي (U+064A) instead
+        raw = "1\n00:00:00,000 --> 00:00:02,000\nسلام دوستان، امروز مي‌خوايم\n"
+        p = self.write("old.srt", raw.encode("cp1256"))
+        cues = fa.load_cues(p, normalized=False)
+        self.assertEqual(cues[0].text, "سلام دوستان، امروز می‌خوایم")
+        self.assertNotIn("\ufffd", cues[0].text)
+
+    def test_decode_bytes(self):
+        self.assertEqual(fa.decode_bytes("سلام".encode("utf-8")), "سلام")
+        self.assertEqual(fa.decode_bytes(b"\xef\xbb\xbf" + "سلام".encode("utf-8")), "سلام")
+        self.assertEqual(fa.decode_bytes("a,b\n1,2\n".encode("utf-16")), "a,b\n1,2\n")
+        self.assertEqual(fa.decode_bytes("كتاب".encode("cp1256")), "کتاب")
+        self.assertEqual(fa.decode_bytes(b""), "")
+
+    def test_tags_keep_real_text(self):
+        self.assertEqual(fa.clean_cue_text("اگه x < 10 باشه و y > 3"), "اگه x < 10 باشه و y > 3")
+        self.assertEqual(fa.clean_cue_text("از {name} استفاده کن"), "از {name} استفاده کن")
+        self.assertEqual(fa.clean_cue_text("List<int>"), "List<int>")
+        self.assertEqual(fa.clean_cue_text("اگر a<b و c>d"), "اگر a<b و c>d")
+        self.assertEqual(fa.clean_cue_text('<font color="#ffff00">زرد</font> <b>پررنگ</b> {\\an8}بالا'),
+                         "زرد پررنگ بالا")
+        self.assertEqual(fa.clean_cue_text("<v Al>سلام</v> <c.colorE5E5E5>دنیا</c><00:00:01.000>"), "سلام دنیا")
+        self.assertEqual([c.text for c in fa.parse_cues("1\n00:00:00,000 --> 00:00:01,000\nاگر a < b و c > d\n")],
+                         ["اگر a < b و c > d"])
+
+    def test_json_text_never_tag_stripped(self):
+        raw = json.dumps([{"start": 0, "end": 1, "text": "<i> یعنی x < 10 و {name}"}])
+        self.assertEqual(fa.parse_cues(raw)[0].text, "<i> یعنی x < 10 و {name}")
+        raw = json.dumps({"words": [{"word": "<b>", "start": 0, "end": 0.5}, {"word": "{x}", "start": 0.5, "end": 1}]})
+        self.assertEqual([c.text for c in fa.parse_cues(raw, words=True)], ["<b>", "{x}"])
+
+    def test_json_bad_times_dropped(self):
+        raw = ('[{"start": Infinity, "end": 2, "text": "inf"}, {"start": NaN, "end": 3, "text": "nan"},'
+               ' {"start": -1, "end": 1, "text": "neg"}, {"start": 1e400, "end": 2, "text": "big"},'
+               ' {"start": 5, "end": Infinity, "text": "endinf"}, {"start": 1, "end": 2, "text": "ok"}]')
+        self.assertEqual(fa.parse_cues(raw), [fa.Cue(1.0, 2.0, "ok")])
+        self.assertIsNone(fa.parse_timestamp(float("inf")))
+        self.assertIsNone(fa.parse_timestamp(float("nan")))
+        for bad in (float("inf"), float("nan")):
+            with self.assertRaises(ValueError):
+                fa.fmt_timestamp(bad)
+
+    def test_deep_json_no_crash(self):
+        raw = "[" * 5000 + "]" * 5000
+        self.assertEqual(fa.parse_cues(raw, kind=None), [])
+        self.assertEqual(fa.parse_cues(raw, kind="json"), [])
+        p = self.write("deep.json", raw)
+        self.assertEqual(fa.load_cues(p), [])
 
     def test_missing_file_raises(self):
         with self.assertRaises(OSError):

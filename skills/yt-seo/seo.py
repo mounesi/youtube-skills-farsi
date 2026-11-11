@@ -39,7 +39,7 @@ HASH_SHOWN, HASH_SPAM, HASH_IGNORED = 3, 15, 60
 
 _URL = re.compile(
     r"(?:https?://|www\.)\S+"
-    r"|\b(?:[A-Za-z0-9-]+\.)+(?:com|be|me|ir|org|net|io|ai|ly|co|app|dev|gg|tv|to)(?:/\S*)?",
+    r"|\b(?:[A-Za-z0-9-]+\.)+(?:com|be|me|ir|org|net|io|ai|ly|co|app|dev|gg|tv|to)(?![A-Za-z0-9-])(?:/\S*)?",
     re.I)
 _YT = re.compile(
     r"(?:https?://)?(?:www\.|m\.|music\.)?(?:youtube\.com/(?P<path>[^\s]*)|youtu\.be/(?P<short>[^\s]+))",
@@ -76,6 +76,32 @@ def n(x):
 def squash(s):
     """Comparison form that also ignores spaces (کلاد کد == کلاد‌کد == کلادکد)."""
     return re.sub(r"\s+", "", fa.fold(s))
+
+
+def _bare(s):
+    """Comparison form without spaces, ZWNJ or punctuation (؛ ، . ! ? « » …), for the title check."""
+    return re.sub(r"[\W_]+", "", fa.fold(s))
+
+
+def _hook_has_keyword(keyword, hook):
+    """Whole-word match: «AI» is not inside «Gmail», but «ایمیل» matches «ایمیل‌ها»
+    and «کلاد کد» matches «کلادکد»."""
+    kt = [fa.fold(t) for t in fa.tokenize(keyword)]
+    if not kt:
+        return bool(squash(keyword)) and squash(keyword) in squash(hook)
+    toks = fa.tokenize(hook)
+    full = [fa.fold(t) for t in toks]
+    cut = [fa.fold(t.split(fa.ZWNJ)[0]) for t in toks]  # «ایمیل‌ها» -> «ایمیل»
+    k = len(kt)
+    for i in range(len(toks) - k + 1):
+        if all(kt[j] in (full[i + j], cut[i + j]) for j in range(k)):
+            return True
+    sk = squash(keyword)
+    for size in {max(1, k - 1), k, k + 1}:
+        for i in range(len(full) - size + 1):
+            if "".join(full[i:i + size]) == sk:
+                return True
+    return False
 
 
 def strip_urls(s):
@@ -185,12 +211,18 @@ def check_hook(lines, title=None, keyword=None):
         out.append(check("error", "hook_link", "لینک در خط اول",
                          "خط اول لینک دارد. خط اول برای قول ویدیو و کلیدواژه است؛ لینک را به خط دوم ببر.",
                          SRC_DM))
-    if title and squash(title) == squash(hook):
-        out.append(check("warn", "hook_title", "تکرار عنوان",
-                         "خط اول عین عنوان است. همان قول را با کلمه‌های دیگر بگو تا عبارت‌های جست‌وجوی بیشتری را "
-                         "پوشش بدهد.", SRC_DM))
+    if title:
+        t, h = _bare(title), _bare(hook)
+        if t and t == h:
+            out.append(check("warn", "hook_title", "تکرار عنوان",
+                             "خط اول عین عنوان است. همان قول را با کلمه‌های دیگر بگو تا عبارت‌های جست‌وجوی بیشتری را "
+                             "پوشش بدهد.", SRC_DM))
+        elif t and len(t) >= 15 and t in h:
+            out.append(check("warn", "hook_title", "تکرار عنوان",
+                             "خط اول عنوان را عیناً در خودش تکرار کرده. همان قول را با کلمه‌های دیگر بگو تا عبارت‌های "
+                             "جست‌وجوی بیشتری را پوشش بدهد.", SRC_DM))
     if keyword:
-        if squash(keyword) in squash(hook):
+        if _hook_has_keyword(keyword, hook):
             out.append(check("ok", "hook_keyword", "کلیدواژه در خط اول",
                              "«{}» در خط اول هست.".format(keyword), SRC_DM))
         else:
@@ -255,19 +287,45 @@ def check_bullets(lines):
                  "{} خط فهرست؛ پیشنهاد ۴ تا ۶ است.".format(n(k)), SRC_DM)
 
 
-def chapter_blocks(lines):
-    blocks, cur = [], []
+def chapter_scan(lines):
+    """Chapter runs in the description.
+
+    Returns (blocks, gapped, bad): blocks = [[(index, seconds, raw, title)]]; a run goes on across
+    blank lines and lines with an impossible time, and ends only at another non-blank line.
+    gapped = ids (positions in blocks) of runs that had blank lines inside; bad = [(index, raw)]
+    for lines that look like a chapter but whose time is impossible (e.g. 3:75)."""
+    blocks, gapped, bad = [], set(), []
+    cur, gap, cur_gapped = [], False, False
     for i, ln in enumerate(lines):
-        cm = chapter_match(ln) if ln.strip() else None
-        if cm:
-            cur.append((i,) + cm)
-        else:
+        if not ln.strip():
             if cur:
-                blocks.append(cur)
-            cur = []
+                gap = True
+            continue
+        cm = chapter_match(ln)
+        if cm:
+            if cur and gap:
+                cur_gapped = True
+            cur.append((i,) + cm)
+            gap = False
+            continue
+        m = _CHAPTER.match(visible(ln))
+        if m and fa.parse_timestamp(m.group(1)) is None:
+            bad.append((i, m.group(1)))
+            continue
+        if cur:
+            if cur_gapped:
+                gapped.add(len(blocks))
+            blocks.append(cur)
+        cur, gap, cur_gapped = [], False, False
     if cur:
+        if cur_gapped:
+            gapped.add(len(blocks))
         blocks.append(cur)
-    return blocks
+    return blocks, gapped, bad
+
+
+def chapter_blocks(lines):
+    return chapter_scan(lines)[0]
 
 
 def validate_chapters(entries, duration=None):
@@ -306,7 +364,12 @@ def validate_chapters(entries, duration=None):
 
 def check_chapters(lines, duration=None):
     title = "فصل‌ها (چپترها)"
-    blocks = chapter_blocks(lines)
+    blocks, gapped, bad = chapter_scan(lines)
+    bad_checks = [check("error", "chapters", title,
+                        "زمان «{}» در خط {} معتبر نیست (دقیقه و ثانیه باید زیر ۶۰ باشند).".format(raw, n(i + 1)),
+                        SRC_YT) for i, raw in bad]
+    if not blocks and bad_checks:
+        return bad_checks
     if not blocks:
         tail = [ln for ln in lines if _CHAPTER_END.match(visible(ln)) and not _URL.search(ln)]
         if len(tail) >= 2:
@@ -318,10 +381,18 @@ def check_chapters(lines, duration=None):
                       SRC_YT)]
     block = max(blocks, key=len) if not any(b[0][1] == 0 for b in blocks) else \
         next(b for b in blocks if b[0][1] == 0)
+    if block[0][1] != 0 and len(block) == 1 and not bad_checks:
+        return [check("info", "chapters", title,
+                      "فقط یک زمان در توضیحات هست ({})؛ این فصل‌بندی نیست و یوتیوب از آن فصل نمی‌سازد. "
+                      "برای فصل‌بندی با 0:00 شروع کن و دست‌کم ۳ فصل بنویس.".format(fa.fmt_timestamp(block[0][1])),
+                      SRC_YT)]
     entries = [(e[1], e[3]) for e in block]
-    out = []
+    out = list(bad_checks)
+    if blocks.index(block) in gapped:
+        out.append(check("warn", "chapters_gap", "خط خالی بین فصل‌ها",
+                         "بین خط‌های فصل خط خالی هست؛ فصل‌ها را پشت سر هم و بدون خط خالی بنویس.", SRC_H))
     probs = validate_chapters(entries, duration)
-    errs = [p for p in probs if p[0] == "error"]
+    errs = [p for p in probs if p[0] == "error"] + bad_checks
     for lvl, msg, src in probs:
         out.append(check(lvl, "chapters", title, msg, src))
     if not errs:
@@ -335,7 +406,8 @@ def check_chapters(lines, duration=None):
                          "با رقم انگلیسی بنویس (0:00).", SRC_H))
     if len(blocks) > 1:
         out.append(check("info", "chapters_blocks", "چند فهرست زمان",
-                         "بیش از یک فهرست زمان در توضیحات هست؛ فقط یکی را فصل‌بندی کن.", SRC_H))
+                         "بیش از یک فهرست زمان در توضیحات هست ({})؛ فقط یکی را فصل‌بندی کن.".format(
+                             "، ".join("از خط {} با {}".format(n(b[0][0] + 1), b[0][2]) for b in blocks)), SRC_H))
     return out
 
 
@@ -386,7 +458,7 @@ def check_english_block(lines, text):
             return check("ok", "english", title, "بخش انگلیسی نزدیک آخر توضیحات هست.", SRC_DM)
     return check("warn", "english", title,
                  "نزدیک آخر توضیحات یک پاراگراف ۱ تا ۳ جمله‌ای انگلیسی نیست. یوتیوب متن فارسی را از راه "
-                 "ترجمه می‌فهمد و ترجمه‌ی فارسی ضعیف است؛ یک خلاصه‌ی انگلیسی قبل از هشتگ‌ها بگذار.", SRC_DM)
+                 "ترجمه می‌فهمد و کیفیت ترجمه از فارسی پایین است؛ یک خلاصه‌ی انگلیسی قبل از هشتگ‌ها بگذار.", SRC_DM)
 
 
 def check_hashtags(lines):
@@ -456,6 +528,8 @@ def lint_description(text, title=None, keyword=None, duration=None):
         text = text[1:]
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     lines = text.split("\n")
+    # A line with only invisible characters (RLM/LRM/ZWNJ/BOM, a paste artefact) is a blank line.
+    lines = [ln if visible(ln) else "" for ln in lines]
     res = [check_length(text)]
     for c in (check_angle_brackets(text), check_arabic_letters(text)):
         if c:
@@ -515,8 +589,11 @@ def lint_tags(tags):
     dups = sorted({t for t, f in zip(tags, folded) if folded.count(f) > 1})
     if dups:
         msg = "تکراری: " + "، ".join(dups)
-        if len(set(dups)) > len({fa.fold(t) for t in dups}):
-            msg += ". بعضی فقط در نیم‌فاصله یا ی/ک عربی فرق دارند؛ اگر عمداً برای کیبورد عربی گذاشتی، نگهش دار."
+        groups = {}
+        for t in dups:
+            groups.setdefault(fa.fold(t), set()).add(t)
+        if any(len({t.lower() for t in g}) > 1 for g in groups.values()):
+            msg += ". بعضی فقط در نیم‌فاصله، اعراب، آ/ا یا ی/ک عربی فرق دارند؛ اگر عمداً برای کیبورد عربی گذاشتی، نگهش دار."
         out.append(check("info", "tags_dup", "تگ تکراری", msg, SRC_H))
     if len(tags) > 15:
         out.append(check("info", "tags_many", "تعداد تگ‌ها",
@@ -539,7 +616,7 @@ def parse_args(argv):
     while i < len(argv):
         a = argv[i]
         if a in ("-h", "--help"):
-            return None, None
+            return "help", None
         if a == "--json":
             opts["json"] = True
         elif "=" in a and a.split("=", 1)[0] in flags:
@@ -611,9 +688,25 @@ def print_report(name, res, tags):
     print()
 
 
+def utf8_stdio():
+    """UTF-8 output even on a Windows pipe or a legacy locale (-I ignores PYTHONIOENCODING)."""
+    if hasattr(fa, "utf8_stdio"):
+        fa.utf8_stdio()
+        return
+    for s in (sys.stdout, sys.stderr):
+        try:
+            s.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 def main(argv=None):
+    utf8_stdio()
     argv = sys.argv[1:] if argv is None else argv
     opts, err = parse_args(argv)
+    if opts == "help":
+        sys.stdout.write(USAGE)
+        return 0
     if opts is None:
         if err:
             sys.stderr.write("خطا: {}\n".format(err))

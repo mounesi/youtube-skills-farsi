@@ -358,6 +358,87 @@ class TestCLI(unittest.TestCase):
             shutil.rmtree(tmp)
 
 
+class TestRegressions(unittest.TestCase):
+    """Fixes from the review: invisible lines, lone timestamps, bad times, URL edges, title/keyword, tags."""
+
+    def test_invisible_only_lines_are_blank(self):
+        good = read("good_fa.txt")
+        res = seo.lint_description("\u200f\n" + good, keyword="کلاد کد", duration=14 * 60)
+        self.assertEqual(worst(res), "ok", [r for r in res if r["level"] != "ok"])
+        res = seo.lint_description(good.replace("\n\n", "\n\u200c\n"), keyword="کلاد کد", duration=14 * 60)
+        self.assertEqual(worst(res), "ok", [r for r in res if r["level"] != "ok"])
+
+    def test_single_timestamp_is_not_a_chapter_list(self):
+        res = seo.lint_description(desc({8: "4:12 جایی که خطا رو خودش درست می‌کنه"}, drop=(9, 10)))
+        self.assertEqual(levels(res, "chapters"), ["info"])
+        self.assertNotIn("error", [r["level"] for r in res])
+        res = seo.lint_description(desc({8: "4:12 الف", 9: "6:00 ب"}, drop=(10,)))
+        msgs = [r["message"] for r in res if r["id"] == "chapters" and r["level"] == "error"]
+        self.assertTrue(any("0:00" in m for m in msgs), msgs)
+
+    def test_impossible_time_is_named(self):
+        res = seo.lint_description(desc({10: "3:75 اولین پروژه"}))
+        msgs = [r["message"] for r in res if r["id"] == "chapters"]
+        self.assertTrue(any("3:75" in m and "۱۱" in m for m in msgs), msgs)
+        self.assertEqual(levels(res, "chapters_blocks"), [])
+
+    def test_blank_lines_between_chapters(self):
+        d = desc({8: "0:00 چرا", 9: "\n0:45 نصب", 10: "\n3:10 پروژه"})
+        res = seo.lint_description(d, duration=600)
+        self.assertEqual(levels(res, "chapters"), ["ok"])
+        self.assertIn("۳ فصل", [r for r in res if r["id"] == "chapters"][0]["message"])
+        self.assertEqual(levels(res, "chapters_gap"), ["warn"])
+
+    def test_blocks_message_names_starts(self):
+        res = seo.lint_description(desc({12: "بهترین لحظه:\n4:12 خطا\nتو با کلاد کد چی می‌سازی؟ تو کامنت بنویس."}))
+        msg = [r for r in res if r["id"] == "chapters_blocks"][0]["message"]
+        self.assertIn("0:00", msg)
+        self.assertIn("4:12", msg)
+
+    def test_url_needs_word_end(self):
+        self.assertEqual(levels(seo.lint_description(desc({0: "راز موفقیت Mr.Beast در یوتیوب؛"})), "hook_link"), [])
+        self.assertEqual(levels(seo.lint_description(desc({0: "آموزش youtu.be/x"})), "hook_link"), ["error"])
+        self.assertEqual(levels(seo.lint_description(desc({0: "آموزش bit.ly"})), "hook_link"), ["error"])
+
+    def test_title_repeat_ignores_punctuation_and_prefix(self):
+        res = seo.lint_description(desc(), title="کلاد کد رو از صفر یاد بگیر؛ بدون اینکه یک خط کد بلد باشی")
+        self.assertEqual(levels(res, "hook_title"), ["warn"])
+        res = seo.lint_description(desc(), title="کلاد کد رو از صفر یاد بگیر")
+        self.assertEqual(levels(res, "hook_title"), ["warn"])
+
+    def test_keyword_whole_words(self):
+        self.assertEqual(levels(seo.lint_description(desc({0: "ساخت ایمیل با Gmail از صفر؛"}), keyword="AI"),
+                                "hook_keyword"), ["warn"])
+        self.assertEqual(levels(seo.lint_description(desc({0: "ساخت ایمیل‌ها با Gmail از صفر؛"}), keyword="ایمیل"),
+                                "hook_keyword"), ["ok"])
+        self.assertEqual(levels(seo.lint_description(desc({0: "کلادکد از صفر"}), keyword="کلاد کد"),
+                                "hook_keyword"), ["ok"])
+
+    def test_tag_dup_case_only(self):
+        msg = [r for r in seo.lint_tags(["Claude", "claude", "کلاد"]) if r["id"] == "tags_dup"][0]["message"]
+        self.assertNotIn("نیم‌فاصله", msg)
+        msg = [r for r in seo.lint_tags(["کلاد", "كلاد"]) if r["id"] == "tags_dup"][0]["message"]
+        self.assertIn("نیم‌فاصله", msg)
+
+    def test_english_warning_wording(self):
+        msg = [r for r in seo.lint_description(desc(drop=(13, 14))) if r["id"] == "english"][0]["message"]
+        self.assertIn("ترجمه از فارسی", msg)
+
+    def test_help_exit_0_stdout(self):
+        code, out, _ = run("--help")
+        self.assertEqual(code, 0)
+        self.assertIn("seo.py", out)
+
+    def test_latin1_locale_pipe(self):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("LC_") and k != "LANG"}
+        env["LC_ALL"] = "en_US.ISO8859-1"
+        p = subprocess.run([sys.executable, "-I", TOOL, os.path.join(FIX, "good_fa.txt")],
+                           capture_output=True, env=env)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertNotIn(b"Traceback", p.stdout + p.stderr)
+        self.assertIn("منتشر نمی‌کند".encode("utf-8"), p.stdout)
+
+
 class TestSkillDoc(unittest.TestCase):
     def test_skill_md(self):
         with open(os.path.join(SKILL, "SKILL.md"), encoding="utf-8") as f:

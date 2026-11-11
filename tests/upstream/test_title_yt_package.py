@@ -89,12 +89,14 @@ class TitleTests(unittest.TestCase):
     # bug 6: a whole word ending exactly at character 40 stays in the mobile preview
     def test_mobile_preview_keeps_full_word(self):
         r = self.t.check("abcdefghi abcdefghi abcdefghi abcdefghij more 5")
-        msg = dict(r["issues"])["mobile"]
+        # Changed on purpose (Farsi pack): the mobile preview is a note (•) now, not a scored issue;
+        # it is an issue only when a --keyword is cut off by the 40-character feed cut.
+        msg = " ".join(r["notes"])
         # Changed on purpose (Farsi pack): the preview is quoted with Persian guillemets and an
         # ellipsis character («...…») instead of "...". The off-by-one fix itself is unchanged.
         self.assertIn('«abcdefghi abcdefghi abcdefghi abcdefghij…»', msg)
         r = self.t.check("abcdefghi abcdefghi abcdefghi abcdefghijkl more 5")
-        self.assertIn('«abcdefghi abcdefghi abcdefghi…»', dict(r["issues"])["mobile"])
+        self.assertIn('«abcdefghi abcdefghi abcdefghi…»', " ".join(r["notes"]))
 
     # bug 7: hyphenated vague words are flagged, without losing hyphen-split matches
     def test_hyphenated_vague(self):

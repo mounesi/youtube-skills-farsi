@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import unittest
@@ -144,8 +145,12 @@ class TestRules(unittest.TestCase):
         self.assertTrue(any(x in texts("کلاد") for x in ("claude", "kelad")))
 
     def test_english_keyword(self):
-        v = texts("Artifact")
-        self.assertEqual(v[0], "artifact")
+        # the keyword is shown the way the user typed it; the lowercase form is a variant
+        items = kw.generate("Artifact")
+        v = [x for x, _s, _w in items]
+        self.assertEqual(v[0], "Artifact")
+        self.assertEqual(items[0][2], ["orig"])
+        self.assertIn(("artifact", ["latin_case"]), [(x, w) for x, _s, w in items])
         self.assertIn("artifakt", v)
 
     def test_also(self):
@@ -213,6 +218,190 @@ class TestCLI(unittest.TestCase):
         self.assertNotIn("../", src)
         self.assertNotIn("yt-script", src)
         self.assertNotIn("/Users/", src)
+
+
+def rx_for(word, exact=False, **k):
+    return kw.build_regex(kw.generate(word, **k), exact=exact)
+
+
+class TestRegexPrecision(unittest.TestCase):
+    """A short keyword must not shrink to a consonant skeleton that DMs everyone."""
+
+    def test_short_keywords_do_not_match_common_words(self):
+        cases = {
+            "سورا": ["سر", "سری جدید", "سوری", "سیر"],
+            "آوا": ["او گفت", "ای وای"],
+            "پایتون": ["بدن", "بتن"],
+            "طلا": ["تل", "تلو"],
+        }
+        for word, comments in cases.items():
+            rx = rx_for(word)
+            for c in comments:
+                self.assertFalse(kw.matches(rx, c), (word, c))
+
+    def test_real_variants_still_match(self):
+        cases = {"سورا": ["سورآ", "سورا لطفا"], "پایتون": ["پایتن", "python"],
+                 "طلا": ["طلاا"], "آرتیفکت": ["آرتیفکت", "ارتیفکت", "ارتیفکیت", "اردیفکت"]}
+        for word, comments in cases.items():
+            rx = rx_for(word)
+            for c in comments:
+                self.assertTrue(kw.matches(rx, c), (word, c))
+
+    def test_every_variant_still_matched(self):
+        for word in ("آوا", "پاییز", "آیووی", "سورا", "طلا", "جمینای", "دهه ۶۰", "ChatGPT"):
+            items = kw.generate(word)
+            for exact in (False, True):
+                rx = kw.build_regex(items, exact=exact)
+                for v, _s, _w in items:
+                    self.assertTrue(re.search(rx, v, re.I), (word, exact, v))
+
+    def test_no_backtracking_blowup(self):
+        import time
+        for word, comment in (("آوا", "آ" + "ا" * 2200 + "x"), ("پاییز", "پ" + "ی" * 2200 + "x"),
+                              ("آیووی", "آ" + "ی" * 2200 + "x"),
+                              ("آرتیفکت", "آر" + "ـ" * 2200 + "x")):
+            rx = rx_for(word)
+            t = time.time()
+            kw.matches(rx, comment)
+            self.assertLess(time.time() - t, 0.5, word)
+
+
+class TestRegexSuffixes(unittest.TestCase):
+    def test_spoken_suffixes(self):
+        cases = {
+            "آرتیفکت": ["ارتیفکتو بفرست", "ارتیفکتها", "ارتیفکتای", "آرتیفکتو", "artifacts",
+                        "Artifacts!"],
+            "پرامپت": ["پرامپتو بفرست", "پرامپتشو", "پرامپتها", "پرامپت‌هارو", "پرامپتمو"],
+            "کلاد": ["کلادو", "کلاد" + ZWNJ + "ها"],
+        }
+        for word, comments in cases.items():
+            rx = rx_for(word)
+            for c in comments:
+                self.assertTrue(kw.matches(rx, c), (word, c))
+        self.assertTrue(kw.matches(rx_for("پرامپت", exact=True), "پرامپتو"))
+
+    def test_longer_words_still_rejected(self):
+        self.assertFalse(kw.matches(rx_for("کلاد"), "کلادیاتور"))
+        self.assertFalse(kw.matches(rx_for("کلاد"), "گلادیاتور"))
+        self.assertFalse(kw.matches(rx_for("پرامپت"), "پرامپتیک"))
+        self.assertFalse(kw.matches(rx_for("پرامپت"), "پرامپتور"))
+        self.assertFalse(kw.matches(rx_for("آرتیفکت"), "آرتیست"))
+
+    def test_ezafe_and_number_words(self):
+        rx = rx_for("دهه ۶۰")
+        for c in ("دهه‌ی ۶۰", "دهه ی ۶۰", "دههٔ ۶۰", "دهه۶۰", "دهه شصت", "دهه شست"):
+            self.assertTrue(kw.matches(rx, c), c)
+        self.assertIn("دهه شصت", texts("دهه ۶۰"))
+        self.assertEqual(kw._num_words(65), "شصت و پنج")
+        self.assertEqual(kw._num_words(120), "صد و بیست")
+
+
+class TestRawComments(unittest.TestCase):
+    """--test must say exactly what the automation will do with the raw comment."""
+
+    def test_invisible_characters_in_the_comment(self):
+        rx = rx_for("آرتیفکت")
+        for c in ("آرتیـفکت", "آرتی‏فکت", "آرتی‎فکت", "﻿آرتیفکت"):
+            self.assertTrue(re.search(rx, c, re.I), repr(c))
+        rx = rx_for("پرامپت")
+        self.assertTrue(re.search(rx, "پرامپـت", re.I))
+        self.assertTrue(re.search(rx, "پِرامپت", re.I))
+        self.assertTrue(re.search(rx_for("هوش مصنوعی"), "هوش  مصنوعی", re.I))
+
+    def test_cli_test_equals_printed_pattern(self):
+        comments = ["آرتیـفکت", "آرتی‏فکت", "ارتیفکتو بفرست", "مرسی", "آرتیست", "artifact!"]
+        args = ["آرتیفکت", "--json"]
+        for c in comments:
+            args += ["--test", c]
+        d = json.loads(run(*args).stdout)
+        for t in d["tests"]:
+            self.assertEqual(t["match"], re.search(d["regex"], t["comment"], re.I) is not None,
+                             t["comment"])
+
+    def test_matches_does_not_normalize(self):
+        self.assertFalse(kw.matches("آرتیفکت", "آرتیـفکت"))
+
+    def test_punctuation_only_keyword_refused(self):
+        r = run("-")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("علامت", r.stderr)
+
+
+class TestRegexPortable(unittest.TestCase):
+    def test_no_w_classes(self):
+        for word, exact in (("کلاد", False), ("آرتیفکت", True), ("ChatGPT", False)):
+            rx = rx_for(word, exact=exact)
+            self.assertNotIn("\\w", rx)
+            self.assertNotIn("\\W", rx)
+
+    def test_python_boundaries(self):
+        rx = rx_for("کلاد")
+        got = [kw.matches(rx, c) for c in ("کلادیاتور", "ماکلادا", "کلاد لطفا", "claude!",
+                                            "کلاد،", "کلاد؟")]
+        self.assertEqual(got, [False, False, True, True, True, True])
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_same_result_in_javascript(self):
+        cases = ["کلادیاتور", "گلادیاتور", "ماکلادا", "کلاد لطفا", "claude!", "کلادو",
+                 "کلاد" + ZWNJ + "ها", "مرسی"]
+        for exact in (False, True):
+            rx = rx_for("کلاد", exact=exact)
+            want = [kw.matches(rx, c) for c in cases]
+            js = ("const r=JSON.parse(process.argv[1]);const c=JSON.parse(process.argv[2]);"
+                  "for(const f of ['i','iu']){const x=new RegExp(r,f);"
+                  "console.log(JSON.stringify(c.map(s=>x.test(s))))}")
+            out = subprocess.run(["node", "-e", js, json.dumps(rx), json.dumps(cases)],
+                                 capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(out.returncode, 0, out.stderr)
+            for line in out.stdout.split():
+                self.assertEqual(json.loads(line), want, (exact, line))
+
+
+class TestRanking(unittest.TestCase):
+    def test_finglish_initial_vowel(self):
+        fin = lambda w: [x for x, _w in kw._finglish(w)]  # noqa: E731
+        self.assertIn("iran", fin("ایران"))
+        self.assertNotIn("ayran", fin("ایران"))
+        self.assertTrue({"open", "opn"} & set(fin("اوپن")))
+        self.assertIn("instagram", fin("اینستاگرام"))
+        self.assertTrue(all(x.startswith(("ij", "ej", "ey")) for x in fin("ایجنت")))
+        self.assertTrue(fin("ایجنت")[0].startswith(("ij", "ej")))
+        self.assertTrue(fin("آوا")[0].startswith("av"))
+
+    def test_no_vowelless_skeletons_on_top(self):
+        self.assertNotIn("hoshmsnoi", texts("هوش مصنوعی")[:30])
+        v = texts("شروع")
+        self.assertLess(v.index("shero"), v.index("shro"))
+
+    def test_final_he_before_digits(self):
+        fin = kw._finglish("دهه60")
+        self.assertIn("dahe60", [x for x, _w in fin])
+        self.assertEqual(fin[0][0], "dahe60")
+
+    def test_prompt_common_spellings(self):
+        top = texts("پرامپت")[:30]
+        self.assertIn("پرومپت", top)
+        self.assertIn("promt", top)
+        self.assertTrue(kw.matches(rx_for("پرامپت"), "promt"))
+        self.assertTrue(kw.matches(rx_for("پرامپت"), "prompts"))
+
+    def test_latin_edits(self):
+        self.assertNotIn("khatgpt", texts("ChatGPT"))
+        self.assertNotIn("mkp", texts("MCP"))
+        ai = texts("AI")
+        self.assertNotIn("ae", ai)
+        self.assertNotIn("aa", ai)
+        self.assertIn("artifakt", texts("artifact"))
+
+    def test_latin_case_label(self):
+        items = kw.generate("AI")
+        self.assertEqual(items[0][:1] + (items[0][2],), ("AI", ["orig"]))
+        self.assertIn(("ai", ["latin_case"]), [(v, w) for v, _s, w in items])
+        rx = kw.build_regex(items)
+        self.assertEqual(rx.count("ai") + rx.count("AI"), 1)  # flag i covers the other case
+        d = json.loads(run("ChatGPT", "--json").stdout)
+        self.assertEqual(d["keyword"], "ChatGPT")
+
 
 if __name__ == "__main__":
     unittest.main()

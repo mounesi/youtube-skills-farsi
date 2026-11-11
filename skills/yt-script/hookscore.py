@@ -3,7 +3,9 @@
 
 پنج ویژگی، هر کدوم از ۰ تا ۱۰۰، و یه حکم که ۶۰٪ میانگینه و ۴۰٪ ضعیف‌ترین ویژگی. این وزن‌دهیِ
 «ضعیف‌ترین حلقه» عمدیه: هوکی که چهار ویژگی قوی و یکی مرده داره، دقیقاً از همون نقطه‌ی مرده بیننده رو
-از دست می‌ده، و میانگین این رو قایم می‌کنه.
+از دست می‌ده، و میانگین این رو قایم می‌کنه. اگه هوک با یکی از ۲۱ فرمول جور بشه، حکم فقط روی
+ویژگی‌هایی حساب می‌شه که اون فرمول روشون سواره (هوکِ «آمار» سؤال لازم نداره، پس کنجکاوی پایینش
+حلقه‌ی ضعیفش حساب نمی‌شه)؛ هوکی که با هیچ فرمولی جور نشه، روی هر پنج ویژگی سنجیده می‌شه.
 
     python3 -I hookscore.py hooks.txt            # هر خط یه هوک، مرتب از قوی به ضعیف
     python3 -I hookscore.py --hook "یه خط"       # نمره‌ی یه هوک
@@ -69,7 +71,18 @@ ADDRESS_PHRASES_FA = ("صبر کن", "گوش کن", "امتحان کن", "دست
 OWN_NOUNS_FA = _f(["کانال", "ویدیو", "ویدئو", "پیج", "پول", "شغل", "مخاطب", "تایتل", "تامبنیل", "اسکریپت",
                    "هوک", "ذهن", "زندگی", "عمر", "وقت", "پست", "ریل", "اکانت", "بیزینس", "برند", "محتوا",
                    "سرمایه", "گوشی", "خونه", "ماشین", "مغز", "موضوع", "بیننده", "فالوور", "سابسکرایبر",
-                   "کامنت", "ایده", "درامد", "رزومه", "تیم", "شرکت", "مشتری", "استارتاپ", "پروژه", "کد"])
+                   "کامنت", "ایده", "درامد", "رزومه", "تیم", "شرکت", "مشتری", "استارتاپ", "پروژه", "کد",
+                   "اپ", "اپلیکیشن", "پرامپت", "سایت", "فایل", "لپتاپ", "حساب", "چنل", "صفحه"])
+# verb / preposition stems that take the 2nd-person object clitic -ت / -تون («نشونت می‌دم»، «کمکت می‌کنم»)
+OBJ_STEMS_FA = _f(["نشون", "نشان", "بگم", "بگ", "کمک", "بد", "بفرست", "بفرستم", "بگیرم", "یاد", "بدم"])
+# light verbs of compound imperatives («کپی کن»، «نصب کن»، «نجات بده»); only after another word
+LIGHT_IMPERATIVE_FA = _f(["کن", "کنید", "بکن", "بکنید", "بزن", "بزنید", "بگیر", "بگیرید", "بردار", "بنداز",
+                          "بندازید"])
+GIVE_IMPERATIVE_FA = _f(["بده", "بدید"])
+NOT_BEFORE_GIVE_FA = _f(["این", "اون", "همین", "همون", "خیلی", "چی"])  # «این بده» = "this is bad"
+# nouns and adjectives that look like «می…ی» verbs but are not
+MI_NOT_VERB_FA = _f(["میزبانی", "مینی", "میانی", "میهمانی", "میوه‌ای", "میراثی", "میکروبی", "میدانی",
+                     "میلادی", "میخی"])
 STAKES_FA = _f(["ضرر", "هدر", "اشتباه", "پول", "وقت", "شغل", "اخراج", "جریمه", "خطر", "نابود", "باخت",
                 "ریسک", "هزینه", "ورشکست", "مسدود", "دیمانتایز", "استرایک", "سوخت", "سوزوند", "بیکار"])
 STAKES_PHRASES_FA = ("از دست", "قبل از اینکه", "قبل از این که", "دیگه نه", "هیچ وقت")
@@ -92,6 +105,7 @@ BRANDS_FA = _f(["یوتیوب", "اینستاگرام", "اینستا", "گوگ�
                 "پریمیر", "میدجرنی", "کرسر", "ایکس", "توییتر", "آمازون", "سامسونگ", "دیپ‌سیک"])
 UNITS_FA = _f(["ثانیه", "دقیقه", "ساعت", "روز", "هفته", "ماه", "سال", "تومان", "تومن", "دلار", "درصد",
                "ریال", "یورو", "برابر"])
+TIME_UNITS_FA = _f(["ثانیه", "دقیقه", "ساعت", "روز", "هفته", "ماه", "سال"])
 NUMWORDS_FA = _f(["یک", "دو", "سه", "چهار", "پنج", "شش", "شیش", "هفت", "هشت", "نه", "ده", "یازده", "دوازده",
                   "سیزده", "چهارده", "پونزده", "پانزده", "شونزده", "شانزده", "هفده", "هجده", "هیجده",
                   "نوزده", "بیست", "سی", "چهل", "پنجاه", "شصت", "هفتاد", "هشتاد", "نود", "صد", "دویست",
@@ -101,6 +115,7 @@ NUM_AMBIGUOUS_FA = _f(["یک", "نه", "نیم"])  # «یک» = a, «نه» = no
 SUFFIXES_FA = frozenset(["", "ها", "های", "ی", "ه", "ت", "تون", "تان", "م", "مون", "ش", "شون", "ات", "هات",
                          "هاتون", "ای", "یه", "رو", "شو", "مو", "تو", "ست", "اش", "هاش", "هامون", "ن", "ید"])
 
+_FA_DIGITS = "۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩"
 FA_CH = "ء-غف-ٰٟپچژکگۀی۰-۹٠-٩٪-٬‌"
 _WORD = re.compile("[a-z0-9'%$." + FA_CH + "]+")
 _FA_LETTER = re.compile("[ء-يپچژکگی]")
@@ -116,7 +131,7 @@ def words(t):
 
 
 def _ftoks(t):
-    return [fa.fold(w) for w in words(t) if _FA_LETTER.search(w) or w[:1] in "۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩"]
+    return [fa.fold(w) for w in words(t) if _FA_LETTER.search(w) or w[:1] in _FA_DIGITS]
 
 
 def _stem(tok, stems):
@@ -135,13 +150,21 @@ def is_fa(t):
     return fa.is_persian(t)
 
 
-def _address_tok(tok):
+def _address_tok(tok, raw=None):
+    """tok = folded token; raw = the same token before folding (keeps the ZWNJ of «می‌»)."""
     if tok in ADDRESS_FA or tok in IMPERATIVE_FA:
         return True
-    if len(tok) >= 4 and (tok.startswith("می") or tok.startswith("نمی")) and (tok.endswith("ی") or tok.endswith("ید")):
-        return True  # میدی، می‌کنی، نمی‌دونی، می‌خواید
-    for suf in ("هاتون", "هات", "تون", "تان", "ت"):  # کانالت، وقتتون، ویدیوهات
+    if len(tok) >= 4 and (tok.endswith("ی") or tok.endswith("ید")):
+        r = fa.normalize(raw) if raw else ""
+        if r.startswith(("می" + fa.ZWNJ, "نمی" + fa.ZWNJ)):
+            return True  # «می‌» + ZWNJ is always the verb prefix: می‌دی، نمی‌دونی، می‌خواید
+        if tok.startswith(("می", "نمی")) and tok not in MI_NOT_VERB_FA and tok[:-1] not in NUMWORDS_FA:
+            return True  # typed without ZWNJ: میدی، نمیدونی (but not میلیونی، میزبانی، مینی)
+    for suf in ("هاتون", "هات", "تون", "تان", "ات", "ت"):  # کانالت، وقتتون، ویدیوهات، صفحه‌ات
         if tok.endswith(suf) and tok[:-len(suf)] in OWN_NOUNS_FA:
+            return True
+    for suf in ("تون", "تان", "ت"):  # object clitic on a verb stem: نشونت، کمکتون، یادت
+        if tok.endswith(suf) and tok[:-len(suf)] in OBJ_STEMS_FA:
             return True
     return False
 
@@ -150,16 +173,51 @@ IN_NEXT_FA = _f(["این", "اون", "همین", "همون", "یه", "یک", "و
                   "اینستاگرام", "یوتیوب", "کامنت", "کامنتها", "توضیحات", "بیو", "ذهن", "سرچ"])
 
 
+def _is_num_tok(x):
+    """A token made only of digits (any script) and number separators: «۳۰»، «12,000»، «۱۲٬۰۰۰»."""
+    return bool(x) and x.strip("0123456789" + _FA_DIGITS + "٫.,٬%٪") == ""
+
+
+def _in_not_you(toks, i):
+    """Colloquial «تو/توی» = "in", not "you": «تو این ویدیو»، «توی یوتیوب»، «تو ۳۰ روز»، «تو هفت ماه»."""
+    if i + 1 >= len(toks):
+        return False
+    nxt = toks[i + 1]
+    if nxt == "هر":
+        # «تو هر ویدیو» = in every video; but «تو هر هفته … هدر می‌دی» = "you, every week": «هر هفته»
+        # already means every week, so a «تو» before it is the viewer
+        return not (i + 2 < len(toks) and _stem(toks[i + 2], TIME_UNITS_FA))
+    if nxt in IN_NEXT_FA or nxt in NUMWORDS_FA or nxt == "چند" or _is_num_tok(nxt):
+        return True
+    if _stem(nxt, UNITS_FA):
+        return True  # «تو 30 روز»: the Latin digits are not in the token list, the unit is
+    # «تو اون سه ماه»، «تو همین ۲ هفته»: a number or «یه/یک» then a unit one token further on
+    return (i + 2 < len(toks) and _stem(toks[i + 2], UNITS_FA)
+            and (nxt in ("یه", "یک") or nxt in NUMWORDS_FA or _is_num_tok(nxt)))
+
+
 def address_fa(t):
-    toks = _ftoks(t)
+    raws = [w for w in words(t) if _FA_LETTER.search(w) or w[:1] in _FA_DIGITS]
+    toks = [fa.fold(w) for w in raws]
     n = 0
     for i, x in enumerate(toks):
-        # colloquial «تو/توی» = "in": «تو این ویدیو»، «توی یوتیوب»
-        if x in ("تو", "توی") and i + 1 < len(toks) and toks[i + 1] in IN_NEXT_FA:
+        if x in ("تو", "توی") and _in_not_you(toks, i):
             continue
-        if _address_tok(x):
+        if _address_tok(x, raws[i]):
             n += 1
+        elif i > 0 and x in LIGHT_IMPERATIVE_FA:
+            n += 1  # «کپی کن»، «نصب کنید»
+        elif i > 0 and x in GIVE_IMPERATIVE_FA and toks[i - 1] not in NOT_BEFORE_GIVE_FA:
+            n += 1  # «نجات بده»، not «این بده»
     return n + _phrases(t, ADDRESS_PHRASES_FA)
+
+
+_DIGIT_THEN_LETTER = re.compile("([0-9" + _FA_DIGITS + "])([ء-يپچژکگی])")
+
+
+def _split_digits(t):
+    """«۳ساعت» -> «۳ ساعت»: a number typed against its Persian unit is still a number and a unit."""
+    return _DIGIT_THEN_LETTER.sub(r"\1 \2", t)
 
 
 def _concrete_text(t):
@@ -168,9 +226,9 @@ def _concrete_text(t):
 
 def numbers_fa(t):
     """(spelled number runs, units that stand alone) in Persian text; digits are counted by CONCRETE."""
-    toks = [fa.fold(w) for w in words(t)]
+    toks = [fa.fold(w) for w in words(_split_digits(t))]
     runs, lone_units, i = 0, 0, 0
-    prev_num = False
+    prev_num = prev_digit = False
     while i < len(toks):
         x = toks[i]
         if x in NUMWORDS_FA:
@@ -179,14 +237,18 @@ def numbers_fa(t):
                 j += 1
             run = [w for w in toks[i:j] if w != "و"]
             if len(run) > 1 or run[0] not in NUM_AMBIGUOUS_FA:
-                runs += 1
+                if not prev_digit:  # «۱۰ هزار» is one number (CONCRETE already counted the «۱۰»)
+                    runs += 1
                 prev_num = True
+            elif prev_digit:
+                prev_num = True
+            prev_digit = False
             i = j
             continue
-        isdigit = bool(re.match(r"^[\d.,%]+$", x))
+        isdigit = bool(re.match(r"^[\d.,%٬٫٪]+$", x))
         if _stem(x, UNITS_FA) and not prev_num:
             lone_units += 1
-        prev_num = isdigit
+        prev_num = prev_digit = isdigit
         i += 1
     return runs, lone_units
 
@@ -223,7 +285,7 @@ def _named_things(t):
 
 def _concrete_count(t):
     runs, lone = numbers_fa(t)
-    return len(CONCRETE.findall(_concrete_text(t))) + runs, lone
+    return len(CONCRETE.findall(_concrete_text(_split_digits(t)))) + runs, lone
 
 
 def specificity(t):
@@ -305,8 +367,12 @@ def match_form(t):
     return fa.fold(t).replace("٬", ",").replace("٫", ".").replace("٪", "%")
 
 
+MATCH_WORDS = 60  # a hook is 8-24 words; longer input is a paragraph, and only its start is matched
+
+
 def formula_hits(f, t):
-    m = match_form(t)
+    # cap the text: some patterns have an unbounded «.*» that turns quadratic on a pasted transcript
+    m = match_form(" ".join(t.split()[:MATCH_WORDS]))
     n = 0
     for p in f.get("match") or []:
         try:
@@ -332,12 +398,57 @@ def classify(t):
     return (best["name"] if best else UNCLASSIFIED), hits
 
 
+# The properties each formula is built on. A statement hook («۹۷ درصد کسایی که…») has no question in
+# it and often no loss either, and the curiosity/stakes floors (24 and 22) would then be its weakest
+# link and sink every Statistic, List or Receipt hook into «ضعیف». So for a hook that matches a formula,
+# the verdict counts only the properties that formula needs; the other scores are still shown. A
+# "needs" list in hooks.json, if a formula has one, wins over this table. A hook that matches no
+# formula (usually a summary or filler) is judged on all five, as before.
+NEEDS = {
+    "the-statistic": ["SPECIFICITY", "STAKES", "BREVITY"],      # a number, then its consequence
+    "someone-elses-result": ["SPECIFICITY", "BREVITY"],
+    "the-mistake": ["ADDRESS", "STAKES", "BREVITY"],
+    "contrarian-flip": ["SPECIFICITY", "BREVITY"],
+    "the-reveal": ["ADDRESS", "BREVITY"],                        # "I'll show you"
+    "the-superlative": ["SPECIFICITY", "BREVITY"],
+    "the-clock": ["SPECIFICITY", "ADDRESS", "BREVITY"],
+    "i-tried-it": ["SPECIFICITY", "BREVITY"],
+    "the-question": ["SPECIFICITY", "CURIOSITY", "BREVITY"],     # the searched question, not "you"
+    "the-before-after": ["SPECIFICITY", "BREVITY"],
+    "the-teardown": ["SPECIFICITY", "BREVITY"],
+    "the-stack": ["SPECIFICITY", "BREVITY"],
+    "the-warning": ["STAKES", "ADDRESS", "BREVITY"],
+    "the-list": ["SPECIFICITY", "BREVITY"],
+    "the-receipt": ["SPECIFICITY", "BREVITY"],
+    "the-insider": ["CURIOSITY", "ADDRESS", "BREVITY"],
+    "the-impossible": ["SPECIFICITY", "BREVITY"],
+    "the-comparison": ["SPECIFICITY", "BREVITY"],
+    "the-origin": ["SPECIFICITY", "BREVITY"],
+    "the-deadline": ["STAKES", "SPECIFICITY", "BREVITY"],
+    "the-direct-address": ["ADDRESS", "SPECIFICITY", "BREVITY"],
+}
+ALL_PROPS = [n for n, _ in PROPS]
+
+
+def counted_props(formula):
+    """The properties the verdict is computed on for this formula (all five when there is none)."""
+    if not formula:
+        return list(ALL_PROPS)
+    needs = formula.get("needs") or NEEDS.get(formula.get("id"))
+    needs = [p for p in ALL_PROPS if p in (needs or ())]
+    return needs or list(ALL_PROPS)
+
+
+def verdict_of(parts, counted):
+    vals = [parts[p] for p in counted]
+    return round(0.6 * (sum(vals) / len(vals)) + 0.4 * min(vals))
+
+
 def score(t):
     parts = {n: fn(t) for n, fn in PROPS}
-    vals = list(parts.values())
-    verdict = round(0.6 * (sum(vals) / len(vals)) + 0.4 * min(vals))
-    name, hits = classify(t)
-    return parts, verdict, name, hits
+    best, hits = classify_formula(t)
+    verdict = verdict_of(parts, counted_props(best))
+    return parts, verdict, (best["name"] if best else UNCLASSIFIED), hits
 
 
 def band(v):
@@ -377,9 +488,11 @@ def result(t):
     t = fa.normalize(t).strip()
     parts, verdict, name, hits = score(t)
     best, _ = classify_formula(t)
-    low = min(parts, key=parts.get)
+    counted = counted_props(best)
+    low = min(counted, key=parts.get)  # advice only on a property this formula is judged on
     return {"hook": t, "properties": parts,
             "properties_fa": {LABEL_FA[k]: v for k, v in parts.items()},
+            "counted": counted, "counted_fa": [LABEL_FA[k] for k in counted],
             "verdict": verdict, "band": band(verdict), "band_fa": BAND_FA[band(verdict)],
             "formula": name, "formula_fa": best.get("name_fa", name) if best else UNCLASSIFIED_FA,
             "formula_id": best.get("id") if best else None, "matched": hits,
@@ -392,7 +505,8 @@ def report(r):
     print("\n  " + t)
     print("  " + "-" * min(72, max(20, len(t))))
     for k, v in r["properties"].items():
-        print("    %-9s %4s  %s" % (LABEL_FA[k], _fa_num(v), "#" * (v // 5)))
+        note = "" if k in r["counted"] else "  (برای این فرمول تو حکم حساب نمی‌شه)"
+        print("    %-9s %4s  %s%s" % (LABEL_FA[k], _fa_num(v), "#" * (v // 5), note))
     print("    %-9s %4s  %s" % ("حکم", _fa_num(r["verdict"]), r["band_fa"]))
     if r["matched"]:
         print("    فرمول     %s (%s) - %s الگو جور شد" % (r["formula_fa"], r["formula"], _fa_num(r["matched"])))
@@ -418,7 +532,17 @@ def main():
             print(__doc__, file=sys.stderr)
             sys.exit(2)
         lines = [a[i + 1]]
-    elif a:
+        extra = a[:i] + a[i + 2:]
+    else:
+        extra = a[1:]
+    if extra:  # one input only: a second file or a stray word would otherwise be dropped without a word
+        print("hookscore: آرگومان اضافه: %s" % " ".join(extra), file=sys.stderr)
+        print(__doc__, file=sys.stderr)
+        sys.exit(2)
+    if "--hook" not in a and a:
+        if os.path.isdir(a[0]):
+            print("hookscore: این یه پوشه‌ست، نه فایل: %s" % a[0], file=sys.stderr)
+            sys.exit(2)
         if not os.path.isfile(a[0]):
             print("hookscore: فایل پیدا نشد: %s" % a[0], file=sys.stderr)
             sys.exit(2)
@@ -428,7 +552,7 @@ def main():
         except (OSError, UnicodeDecodeError) as e:
             print("hookscore: فایل خونده نشد: %s (%s)" % (a[0], e), file=sys.stderr)
             sys.exit(2)
-    else:
+    elif not a:
         print(__doc__, file=sys.stderr)
         sys.exit(1)
     lines = [fa.normalize(x).strip() for x in lines]
@@ -438,6 +562,11 @@ def main():
         sys.exit(2)
     if not FORMULAS:
         print("hookscore: hooks.json پیدا یا خونده نشد؛ ستون فرمول خالی می‌مونه", file=sys.stderr)
+    long_lines = sum(1 for x in lines if len(x.split()) > MATCH_WORDS)
+    if long_lines:
+        print("hookscore: %s خط بیشتر از %s کلمه داره؛ این شبیه پاراگراف یا متن کامل ویدیوئه، نه هوک "
+              "(هر خط یه هوک). فرمول فقط روی %s کلمه‌ی اولش سنجیده شد."
+              % (_fa_num(long_lines), _fa_num(MATCH_WORDS), _fa_num(MATCH_WORDS)), file=sys.stderr)
     out = sorted((result(t) for t in lines), key=lambda r: -r["verdict"])
     if as_json:
         print(json.dumps([{k: v for k, v in r.items() if k != "matched"} for r in out],

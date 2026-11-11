@@ -2,8 +2,8 @@
 """swipe.py - ویدیوها و ریلزها را بر اساس اینکه چند برابرِ میانه‌ی خودِ کانال/اکانت دیده شده‌اند رتبه می‌دهد
 و فرمول عنوان (یا خط اول کپشن) را نام می‌برد.
 
-    python3 -I swipe.py collected.json
-    python3 -I swipe.py collected.json --min 2 --json
+    python3 -I swipe.py a.json b.json c.json        (یک فایل برای هر کانال)
+    python3 -I swipe.py a.json b.json --min 2 --json
     python3 -I swipe.py reels.csv --min ۳
     python3 -I swipe.py search.json --phrase "آموزش کلاد"
 
@@ -13,7 +13,7 @@
     [{"account": "@...", "caption": "...", "plays": "۱۲ هزار"}, ...]        (اینستاگرام)
 
 این‌ها هم همان‌طور که هستند خوانده می‌شوند: {"videos": [...]}، {"reels": [...]}، خروجی
-`yt-dlp --flat-playlist -J` (entries و view_count)، و خروجی اسکرپرهای اینستاگرام
+`yt-dlp --flat-playlist -J` (entries و view_count)، خروجی `yt-dlp -j` (هر خط یک ویدیو)، و خروجی اسکرپرهای اینستاگرام
 (ownerUsername، videoPlayCount، videoViewCount). ستون‌های CSV می‌توانند فارسی باشند:
 کانال/اکانت، عنوان/کپشن، بازدید/پلی، لینک.
 
@@ -30,7 +30,7 @@
 با --phrase، روی نتایج جست‌وجو (مثلاً yt-dlp -J "ytsearch20:عبارت") عرضه‌ی آن عبارت را می‌شمارد:
 چند تا از ۱۰ عنوان اول عبارت را عیناً دارند، چند تا از کانال‌های کوچک‌تر از بازدیدشان آمده‌اند.
 """
-import argparse, csv, datetime, io, json, os, re, statistics, sys
+import argparse, csv, datetime, io, json, math, os, re, statistics, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -111,6 +111,10 @@ def _keys(*names):
 
 VIEW_KEYS = _keys("views", "view_count", "viewCount", "videoViewCount", "plays", "play_count", "playCount",
                   "videoPlayCount", "ig_play_count", "بازدید", "بازدیدها", "ویو", "پلی", "تعداد بازدید")
+# Two different metrics: Instagram "views" and "plays" are not the same count, so one account is only
+# ever measured on one of them (the one most of its rows have). Spellings inside a family are the same metric.
+PLAY_KEYS = _keys("plays", "play_count", "playCount", "videoPlayCount", "ig_play_count", "پلی")
+METRIC_FA = {"views": "بازدید", "plays": "پلی"}
 CHANNEL_KEYS = _keys("channel", "uploader", "account", "username", "ownerUsername", "owner", "handle",
                      "کانال", "اکانت", "حساب", "پیج")
 TITLE_KEYS = _keys("title", "caption", "text", "عنوان", "کپشن", "متن")
@@ -118,15 +122,30 @@ URL_KEYS = _keys("url", "webpage_url", "link", "permalink", "لینک", "آدر�
 SUBS_KEYS = _keys("subscribers", "channel_follower_count", "followers", "followersCount", "سابسکرایبر",
                   "مشترک", "فالوور", "دنبال‌کننده")
 KID_KEYS = _keys("videos", "entries", "reels", "items", "posts", "ویدیوها", "ریلزها")
-IG_HINTS = _keys("account", "caption", "plays", "play_count", "playCount", "videoPlayCount", "ownerUsername",
-                 "shortCode", "ig_play_count", "اکانت", "کپشن", "پلی", "پیج")
+# Key names are only a weak hint of the platform (a YouTube sheet can have a "caption" column), so they
+# are used only when a channel has no platform field and no youtube/instagram URL at all.
+IG_ONLY_HINTS = set(_keys("plays", "play_count", "playCount", "videoPlayCount", "videoViewCount", "ownerUsername",
+                          "shortCode", "ig_play_count", "پلی", "پیج"))
+IG_SOFT_HINTS = set(_keys("account", "caption", "اکانت", "کپشن"))
+YT_HINTS = set(_keys("channel", "uploader", "uploader_id", "channel_id", "title", "view_count",
+                     "channel_follower_count", "کانال", "عنوان"))
+FORMAT_FA = {"video": "ویدیو", "short": "شورتس", "live": "لایو"}
+
+
+def _metric(key):
+    return "plays" if key in PLAY_KEYS else "views"
+
+
+def _index(d):
+    idx = {}
+    for key, val in d.items():
+        idx.setdefault(_k(key), val)
+    return idx
 
 
 def _get(d, keys):
     """First non-empty value whose (folded) key is in keys, in the order keys are listed."""
-    idx = {}
-    for key, val in d.items():
-        idx.setdefault(_k(key), val)
+    idx = _index(d)
     for key in keys:
         val = idx.get(key)
         if isinstance(val, dict):  # e.g. {"owner": {"username": "x"}}
@@ -136,15 +155,44 @@ def _get(d, keys):
     return None
 
 
+def _view_fields(d):
+    """{metric family: first non-empty value of that family}, in VIEW_KEYS order."""
+    idx, out = _index(d), {}
+    for key in VIEW_KEYS:
+        val = idx.get(key)
+        if val is None or isinstance(val, (dict, list)) or str(val).strip() == "":
+            continue
+        out.setdefault(_metric(key), val)
+    return out
+
+
+_SCI = re.compile(r"[+]?\d+(?:\.\d+)?[eE][+-]?\d+")
+_SPACE_GROUP = re.compile(r"\d[   ]\d{3}(?!\d)")
+_SPACE_GROUPED = re.compile(r"\d{1,3}(?:[   ]\d{3})+")
+
+
 def _num(x):
-    """A count as a float, or None when it is missing/unknown. Never guesses."""
+    """A count as a float, or None when it is missing/unknown/infinite. Never guesses."""
     if x is None or isinstance(x, bool):
         return None
     if isinstance(x, (int, float)):
-        n = float(x)
+        try:
+            n = float(x)
+        except OverflowError:  # a 400-digit JSON integer
+            return None
     else:
-        n = fa.parse_number(str(x))
-    if n is None or n != n or n < 0:
+        t = fa.normalize(str(x), digits="ascii").strip()
+        if _SCI.fullmatch(t):
+            n = float(t)                       # "1.2E+06" is 1200000, not 1.2
+        elif re.search(r"\d[eE][+-]?\d", t):
+            return None                        # "1.2e6 views": not read as 1.2
+        elif _SPACE_GROUP.search(t):
+            if not _SPACE_GROUPED.fullmatch(t):
+                return None                    # "12 400 views": not read as 12
+            n = float(re.sub(r"\s", "", t))    # "12 400" / "1 234 567"
+        else:
+            n = fa.parse_number(t)
+    if n is None or not math.isfinite(n) or n < 0:
         return None
     return n
 
@@ -153,16 +201,29 @@ def _views(v):
     return _num(v.get("views"))
 
 
-def _platform(node, url):
-    p = str(node.get("platform") or node.get("پلتفرم") or "").strip().lower()
+def _platform_word(p):
+    p = str(p or "").strip().lower()
     if p in ("instagram", "ig", "insta", "اینستاگرام", "اینستا"):
         return "instagram"
     if p in ("youtube", "yt", "یوتیوب"):
         return "youtube"
-    if "instagram.com" in (url or ""):
+    return None
+
+
+def _url_platform(url):
+    u = (url or "").lower()
+    if "instagram.com" in u:
         return "instagram"
+    if "youtube.com" in u or "youtu.be" in u:
+        return "youtube"
+    return None
+
+
+def _guess_platform(node):
+    """Weak guess from key names only (for a channel with no platform field and no URL)."""
     keys = {_k(x) for x in node}
-    return "instagram" if keys & set(IG_HINTS) else "youtube"
+    ig = 2 * len(keys & IG_ONLY_HINTS) + len(keys & IG_SOFT_HINTS)
+    return "instagram" if ig > len(keys & YT_HINTS) else "youtube"
 
 
 def _first_line(text):
@@ -172,26 +233,91 @@ def _first_line(text):
     return ""
 
 
-def _flatten(node, parent_ch=None, parent_pf=None):
+def _tab_format(node):
+    """yt-dlp channel tab ("X - Shorts", .../shorts) -> its format, else None."""
+    title = str(node.get("title") or "").strip().lower()
+    url = str(node.get("webpage_url") or node.get("url") or "").strip().lower().rstrip("/")
+    for fmt, word, path in (("short", "shorts", "/shorts"), ("live", "live", "/streams"),
+                            ("video", "videos", "/videos")):
+        if re.search(r"(^|-\s*)%s$" % word, title) or url.endswith(path):
+            return fmt
+    return None
+
+
+def _flatten(node, parent_ch=None, parent_pf=None, parent_fmt=None):
     """A plain list, {"videos"|"entries"|"reels": [...]}, nested yt-dlp channel tabs, or one row."""
     if isinstance(node, list):
         for x in node:
-            yield from _flatten(x, parent_ch, parent_pf)
+            yield from _flatten(x, parent_ch, parent_pf, parent_fmt)
         return
     if not isinstance(node, dict):
         return
     ch = _get(node, CHANNEL_KEYS) or parent_ch
+    own_pf = _platform_word(node.get("platform") or node.get("پلتفرم"))
     kids = _get(node, KID_KEYS)
     if isinstance(kids, list):
-        pf = parent_pf or (_platform(node, "") if node.get("platform") or node.get("پلتفرم") else None)
-        yield from _flatten(kids, ch or node.get("title"), pf)
+        yield from _flatten(kids, ch or node.get("title"), own_pf or parent_pf, _tab_format(node) or parent_fmt)
         return
     url = str(_get(node, URL_KEYS) or "")
-    pf = _platform(node, url) if (node.get("platform") or node.get("پلتفرم")) else (parent_pf or _platform(node, url))
     title = _get(node, TITLE_KEYS)
+    fields = _view_fields(node)
+    fmt = "short" if "/shorts/" in url.lower() else (parent_fmt or "video")
     yield {"channel": str(ch) if ch is not None else "?", "title": _first_line(title) if title is not None else "",
-           "views": _get(node, VIEW_KEYS), "url": url, "platform": pf,
-           "subscribers": _get(node, SUBS_KEYS), "upload_date": node.get("upload_date") or node.get("timestamp")}
+           "views": next(iter(fields.values()), None), "view_fields": fields, "url": url,
+           "platform": own_pf or parent_pf or _url_platform(url), "platform_guess": _guess_platform(node),
+           "format": fmt, "subscribers": _get(node, SUBS_KEYS),
+           "upload_date": node.get("upload_date") or node.get("timestamp")}
+
+
+def _chkey(name):
+    """Grouping form of a channel/account name: «@Ali »، «ali» و «علي» are one account."""
+    return fa.fold(str(name if name is not None else "?")).strip().lstrip("@").strip() or "?"
+
+
+def _resolve_platforms(rows):
+    """One platform per channel where the data says so (platform field or URL, majority of its rows);
+    a channel with no such signal falls back to a per-row guess from its key names."""
+    votes = {}
+    for r in rows:
+        if r.get("platform"):
+            c = votes.setdefault(_chkey(r["channel"]), {})
+            c[r["platform"]] = c.get(r["platform"], 0) + 1
+    for r in rows:
+        c = votes.get(_chkey(r["channel"]))
+        if c:
+            r["platform"] = max(sorted(c), key=lambda p: c[p])
+        elif not r.get("platform"):
+            r["platform"] = r.get("platform_guess") or "youtube"
+    return rows
+
+
+def _pick_metrics(rows):
+    """Per account, keep only the metric (views or plays) most of its rows have. Returns the notes
+    [(platform, channel name, rows dropped, chosen metric, other metric)]."""
+    groups = {}
+    for r in rows:
+        if "view_fields" in r:
+            groups.setdefault((r["platform"], _chkey(r["channel"])), []).append(r)
+    notes = []
+    for (pf, _), rs in groups.items():
+        count = {}
+        for r in rs:
+            for m, val in r["view_fields"].items():
+                if _num(val) is not None:
+                    count[m] = count.get(m, 0) + 1
+        if not count:
+            continue
+        chosen = max(("views", "plays"), key=lambda m: count.get(m, 0))  # tie -> views (first in VIEW_KEYS)
+        dropped = 0
+        for r in rs:
+            had = r["view_fields"]
+            r["views"] = had.get(chosen)
+            if _num(r["views"]) is None and any(_num(v) is not None for m, v in had.items() if m != chosen):
+                dropped += 1
+        if dropped:
+            other = "plays" if chosen == "views" else "views"
+            notes.append((pf, str(rs[0]["channel"]).strip() or "?", dropped, chosen, other))
+    return notes
 
 
 def _read(path):
@@ -199,9 +325,23 @@ def _read(path):
         raw = fh.read()
     s = raw.lstrip()
     if s[:1] in "[{":
-        return list(_flatten(json.loads(raw)))
-    if path.lower().endswith((".json", ".jsonl")):
-        return list(_flatten([json.loads(l) for l in raw.splitlines() if l.strip()]))
+        try:
+            data = json.loads(raw)
+        except ValueError as whole:
+            # JSON Lines (yt-dlp -j: one object per line) or several JSON documents appended to one
+            # file (yt-dlp -J >> all.json), whatever the file extension
+            dec, i, data = json.JSONDecoder(), 0, []
+            while True:
+                while i < len(raw) and raw[i].isspace():
+                    i += 1
+                if i >= len(raw):
+                    break
+                try:
+                    obj, i = dec.raw_decode(raw, i)
+                except ValueError as e:
+                    raise (whole if not data else e)
+                data.append(obj)
+        return list(_flatten(data))
     sample = raw[:4096]
     delim = "\t" if sample.count("\t") > sample.count(",") else ","
     return list(_flatten(list(csv.DictReader(io.StringIO(raw), delimiter=delim))))
@@ -214,11 +354,20 @@ def _words(text):
 
 
 def has_phrase(title, phrase):
-    """Phrase appears as written (word for word, ZWNJ/space and ی/ي differences ignored)."""
-    t, p = _words(title), _words(phrase)
+    """Phrase appears as written (whole words, in order; ZWNJ, space or no gap and ی/ي differences
+    ignored: «می‌خوام»، «میخوام» و «می خوام» یکی‌اند، ولی «خوام» با «میخوام» نمی‌خواند)."""
+    t, p = _words(title), "".join(_words(phrase))
     if not p:
         return False
-    return any(t[i:i + len(p)] == p for i in range(len(t) - len(p) + 1))
+    for i in range(len(t)):
+        acc = ""
+        for j in range(i, len(t)):
+            acc += t[j]
+            if acc == p:
+                return True
+            if len(acc) >= len(p) or not p.startswith(acc):
+                break
+    return False
 
 
 def _recent(d, today):
@@ -264,9 +413,16 @@ class _Parser(argparse.ArgumentParser):
 
 
 def _threshold(s):
-    n = fa.parse_number(s)
-    if n is None or n < 0:
-        raise argparse.ArgumentTypeError("--min باید یک عدد مثبت باشد، مثلاً 2 یا ۲٫۵ (نه %r)" % s)
+    bad = argparse.ArgumentTypeError("--min باید یک عدد مثبت باشد، مثلاً 2 یا ۲٫۵ (نه %r)" % s)
+    t = fa.normalize(str(s), digits="ascii").strip()
+    try:
+        n = float(t)                   # "2", "2.5", "1e3"
+    except ValueError:
+        if re.search(r"\d[eE]", t) or _SPACE_GROUP.search(t):
+            raise bad                  # "1e3x", "1 500": never read as 1 or 1.0
+        n = fa.parse_number(t)         # "۲٫۵", "۳"
+    if n is None or not math.isfinite(n) or n < 0:
+        raise bad
     return n
 
 
@@ -282,63 +438,91 @@ def _label(r):
 
 def main():
     p = _Parser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("file", help="فایل JSON یا CSV")
+    p.add_argument("file", nargs="+", help="یک یا چند فایل JSON یا CSV (مثلاً یک فایل برای هر کانال)")
     p.add_argument("--min", type=_threshold, default=1.5, help="حداقل چند برابرِ میانه (پیش‌فرض ۱٫۵)")
     p.add_argument("--json", action="store_true", help="خروجی JSON برای ابزارهای دیگر")
     p.add_argument("--phrase", help="عبارت جست‌وجو برای سنجش عرضه روی نتایج جست‌وجو")
     args = p.parse_args()
     lo = args.min
-    if not os.path.isfile(args.file):
-        print(__doc__)
-        print("swipe.py: فایل «%s» پیدا نشد." % args.file, file=sys.stderr)
-        sys.exit(1)
-    try:
-        rows = _read(args.file)
-    except (ValueError, csv.Error, UnicodeDecodeError) as e:
-        print("swipe.py: «%s» خوانده نشد (JSON یا CSV معتبر نیست): %s" % (args.file, e), file=sys.stderr)
-        sys.exit(2)
+    for f in args.file:
+        if not os.path.isfile(f):
+            print(__doc__)
+            print("swipe.py: فایل «%s» پیدا نشد." % f, file=sys.stderr)
+            sys.exit(1)
+    rows = []
+    for f in args.file:
+        try:
+            rows.extend(_read(f))
+        except OSError as e:
+            print("swipe.py: «%s» خوانده نشد: %s" % (f, e), file=sys.stderr)
+            sys.exit(2)
+        except (ValueError, csv.Error, UnicodeDecodeError, RecursionError) as e:
+            print("swipe.py: «%s» خوانده نشد (JSON یا CSV معتبر نیست): %s" % (f, e), file=sys.stderr)
+            sys.exit(2)
     if not rows or not any(_views(v) is not None for v in rows):
         print("swipe.py: در «%s» هیچ ویدیو یا ریلزی با عدد بازدید پیدا نشد. "
               "انتظار می‌رفت فهرستی از {channel, title, views} یا {account, caption, plays}، "
-              "{\"videos\": [...]} یا خروجی yt-dlp -J باشد." % args.file, file=sys.stderr)
+              "{\"videos\": [...]} یا خروجی yt-dlp -J باشد." % "»، «".join(args.file), file=sys.stderr)
         sys.exit(2)
 
-    by, unknown = {}, 0
+    _resolve_platforms(rows)
+    metric_notes = _pick_metrics(rows)
+
+    # group by platform + normalised channel name + format (Shorts / live / long videos: one median each)
+    by, names, fmts, unknown = {}, {}, {}, 0
     for r in rows:
         n = _views(r)
         if n is None:
             unknown += 1
             continue
-        by.setdefault((r["platform"], r["channel"] or "?"), []).append((r, n))
-    out, thin = [], []
-    for (pf, ch), vids in by.items():
+        ck = (r["platform"], _chkey(r["channel"]))
+        names.setdefault(ck, str(r["channel"]).strip() or "?")
+        fmt = r.get("format") or "video"
+        fmts.setdefault(ck, set()).add(fmt)
+        by.setdefault(ck + (fmt,), []).append((r, n))
+    out, thin, zero_med = [], [], []
+
+    def skipped(ck, fmt, count):
+        return [names[ck], count] + ([fmt] if len(fmts[ck]) > 1 else [])
+
+    for (pf, key, fmt), vids in by.items():
+        ck = (pf, key)
         if len(vids) < MIN_PER_CHANNEL:
-            thin.append((ch, len(vids)))
+            thin.append(skipped(ck, fmt, len(vids)))
             continue
         med = statistics.median([n for _, n in vids])
+        if med <= 0:  # most uploads have no views yet: a multiple of zero means nothing
+            zero_med.append(skipped(ck, fmt, len(vids)))
+            continue
         for v, n in vids:
-            m = (n / med) if med else 0
             title = v.get("title") or ""
-            out.append({"channel": ch, "platform": pf, "title": title, "views": int(n), "median": int(med),
-                        "multiple": round(m, 2), "formula": classify(title), "formula_fa": classify_fa(title),
+            out.append({"channel": names[ck], "platform": pf, "format": fmt, "multi_format": len(fmts[ck]) > 1,
+                        "title": title, "views": int(n), "median": int(med),
+                        "multiple": round(n / med, 2), "formula": classify(title), "formula_fa": classify_fa(title),
                         "url": v.get("url") or ""})
+    measured = len(by) - len(thin) - len(zero_med)
     out = [r for r in out if r["multiple"] >= lo]
     out.sort(key=lambda r: -r["multiple"])
     sup = supply(rows, args.phrase) if args.phrase else None
 
     if args.json:
-        res = {"outliers": out, "skipped_thin_channels": thin, "skipped_unknown_views": unknown,
+        for r in out:
+            r.pop("multi_format")
+        res = {"outliers": out, "skipped_thin_channels": thin, "skipped_zero_median_channels": zero_med,
+               "skipped_unknown_views": unknown,
+               "skipped_other_metric": [{"platform": pf, "channel": ch, "count": n, "metric": m, "other": o}
+                                        for pf, ch, n, m, o in metric_notes],
                "formulas_file": os.path.relpath(FORMULAS_FILE, HERE) if FORMULAS_FILE else None}
         if sup is not None:
             res["supply"] = sup
         print(json.dumps(res, ensure_ascii=False, indent=1))
         return
 
-    pfs = {pf for pf, _ in by}
+    pfs = {k[0] for k in by}
     unit = "ویدیو/ریلز" if len(pfs) > 1 else ("ریلز" if pfs == {"instagram"} else "ویدیو")
     who = "کانال/اکانت" if len(pfs) > 1 else ("اکانت" if pfs == {"instagram"} else "کانال")
     print("\n  %s %s از %s %s - برجسته‌ها از %s برابرِ میانه به بالا\n"
-          % (F(len(rows)), unit, F(len(by)), who, F(lo, 1)))
+          % (F(len(rows)), unit, F(len({k[:2] for k in by})), who, F(lo, 1)))
     if sup is not None:
         print("  عرضه برای «%s» (در %s نتیجه‌ی اول، به همان ترتیبی که در فایل آمده)" % (sup["phrase"], F(sup["top"])))
         print("    عبارت عیناً در عنوان: %s از %s   (۰ تا ۲ یعنی جا هست)" % (F(sup["exact_phrase"]), F(sup["top"])))
@@ -353,17 +537,34 @@ def main():
         print("  (برای رتبه‌بندی برجسته‌ها از هر %s دست‌کم %s %s لازم است؛ نتایج جست‌وجو معمولاً این را ندارند.)\n"
               % (who, F(MIN_PER_CHANNEL), unit))
         return
+    def label(ch, fmt=None):
+        return "%s (%s)" % (ch, FORMAT_FA.get(fmt, fmt)) if fmt else ch
+
     for r in out[:25]:
+        ch = label(r["channel"][:22], r["format"] if r["multi_format"] else None)
         print("    %s×  %s بازدید  در برابر میانه‌ی %s   %s  %s"
-              % (F(r["multiple"], 2), F(r["views"]), F(r["median"]), r["channel"][:22], r["title"][:60]))
+              % (F(r["multiple"], 2), F(r["views"]), F(r["median"]), ch, r["title"][:60]))
         print("            فرمول: %s" % r["formula_fa"])
-    if not out:
+    if not out and measured:
         print("    هیچ موردی به این آستانه نرسید - از هر %s %s بیشتری جمع کن یا --min را پایین بیاور."
               % (who, unit))
+
+    def listing(items):
+        return "  " + "، ".join("%s (%s، %s)" % (it[0], FORMAT_FA.get(it[2], it[2]), F(it[1])) if len(it) > 2
+                                else "%s (%s)" % (it[0], F(it[1])) for it in items[:6]) + (" …" if len(items) > 6 else "")
+
     if thin:
         print("\n  %s %s کنار گذاشته شد چون کمتر از %s %s داشت - میانه‌ی یکی دو ویدیو میانه نیست:"
               % (F(len(thin)), who, F(MIN_PER_CHANNEL), unit))
-        print("  " + "، ".join("%s (%s)" % (c, F(n)) for c, n in thin[:6]) + (" …" if len(thin) > 6 else ""))
+        print(listing(thin))
+    if zero_med:
+        print("\n  %s %s کنار گذاشته شد چون میانه‌ی بازدیدش صفر است (بیشتر ویدیوها هنوز بازدید ندارند) "
+              "- چندبرابرِ صفر معنا ندارد:" % (F(len(zero_med)), who))
+        print(listing(zero_med))
+    for pf, ch, n, m, o in metric_notes:
+        ig = pf == "instagram"
+        print("\n  برای %s %s، %s %s فقط «%s» داشت نه «%s» و کنار گذاشته شد تا این دو قاطی نشوند."
+              % ("اکانت" if ig else "کانال", ch, F(n), "ریلز" if ig else "ویدیو", METRIC_FA[o], METRIC_FA[m]))
     if unknown:
         print("\n  %s مورد بدون عدد بازدید کنار گذاشته شد (لایو، پریمیر یا هنوز پخش‌نشده) - صفر حساب نشد."
               % F(unknown))

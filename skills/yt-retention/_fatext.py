@@ -19,6 +19,7 @@ youtube-agent-skill اثر Jake Schincariol (مجوز MIT) گرفته شده، �
 """
 import html
 import json
+import math
 import re
 import unicodedata
 from collections import namedtuple
@@ -29,7 +30,7 @@ __all__ = [
     "normalize", "fold", "to_ascii_digits", "to_fa_digits", "parse_number",
     "tokenize", "word_count", "norm_words", "script_counts", "script_ratio", "is_persian",
     "latin_tokens", "parse_timestamp", "fmt_timestamp", "Cue", "clean_cue_text", "parse_cues",
-    "load_cues", "duration", "is_filler", "is_filler_only", "strip_fillers",
+    "load_cues", "decode_bytes", "duration", "is_filler", "is_filler_only", "strip_fillers",
     "FILLERS_FA", "HESITATIONS_FA", "DISCOURSE_FILLERS_FA", "FILLER_PHRASES_FA", "FILLERS_EN",
     "FILLER_PHRASES_EN", "STOPWORDS_FA", "STOPWORDS_EN", "ZWNJ",
 ]
@@ -152,7 +153,12 @@ _MULT = [  # longest first
     ("تریلیون", 1e12), ("trillion", 1e12),
 ]
 _MULT.sort(key=lambda p: -len(p[0]))
-_NUM = re.compile(r"(?P<sign>(?<![\w.,])[-−+])?(?P<num>\d+(?:[.,/'٫٬،]\d+)*)")
+# a leading separator counts only when it is not glued to a word or another number: «٫۵» = 0.5, «.5k» = 500
+_NUM = re.compile(r"(?P<sign>(?<![\w.,])[-−+])?"
+                  r"(?P<num>(?:(?<![\w.,٫٬])[.٫](?=\d))?\d+(?:[.,/'٫٬،]\d+)*)")
+# single ASCII letters that are a multiplier only when they touch the digits ("4.5M" yes, "5 m" no:
+# "m" is also minutes / metres)
+_TOUCH_ONLY = frozenset(["m", "b"])
 
 _FA_WORD_NUM = {
     "صفر": 0, "یک": 1, "یه": 1, "دو": 2, "سه": 3, "چهار": 4, "چار": 4, "پنج": 5, "شش": 6, "شیش": 6,
@@ -200,28 +206,75 @@ def _num_core(s):
         return None
 
 
+def _combine(items, strict=False):
+    """Add up number parts in order: ('v', value, is_digits), ('s', scale), ('and',), ('half',).
+    «یک و نیم میلیون» = 1.5e6، «نیم میلیون» = 5e5، «دو میلیون و نیم» = 2.5e6، «۱۲ هزار و ۵۰۰» = 12500.
+    strict=True: None for anything that is not one well-formed number (two numbers with no «و» between
+    them, a later scale that is not smaller than the one before, «و» at the start or end, …)."""
+    total, cur, last, used, half = 0.0, 0.0, 0.0, False, False
+    prev = None          # kind of the previous item
+    grp = []             # values added in the current group: (value, is_digits)
+    for it in items:
+        k = it[0]
+        if k == "and":
+            if strict and prev in (None, "and"):
+                return None
+            prev = k
+            continue
+        if k == "half":
+            if strict and (half or prev not in (None, "and") or (prev is None and grp)):
+                return None
+            half = used = True
+        elif k == "v":
+            val, digits = it[1], it[2]
+            if strict:
+                if half or (prev is not None and prev != "and"):
+                    return None
+                if grp:
+                    pv, pdig = grp[-1]
+                    place = 10 ** int(math.floor(math.log10(pv))) if pv >= 10 else 0
+                    if digits or pdig or not place or pv % place or val >= place:
+                        return None
+            cur += val
+            grp.append((val, digits))
+            used = True
+        else:  # scale
+            scale = it[1]
+            if strict and (prev == "and" or (last and scale >= last)):
+                return None
+            base = ((cur + 0.5) if cur else 0.5) if half else (cur or 1)
+            if strict and last and base * scale >= last:
+                return None
+            total += base * scale
+            last = scale
+            cur, half, used, grp = 0.0, False, True, []
+        prev = k
+    if not used or (strict and prev == "and"):
+        return None
+    if half:
+        rest = (cur + 0.5) if cur else 0.5 * (last or 1)
+    else:
+        rest = cur
+    if strict and last and rest >= last:
+        return None
+    return total + rest
+
+
 def _words_number(words):
     """Persian spelled-out number from a token list: ['یک', 'و', 'نیم', 'میلیون'] -> 1.5e6."""
-    total, cur, used, half = 0.0, 0.0, False, False
+    items = []
     for w in words:
         if w == "و":
-            continue
-        if w in ("نیم", "نیمه"):
-            half = True
-            used = True
-            continue
-        if w in _FA_WORD_NUM:
-            cur += _FA_WORD_NUM[w]
-            used = True
+            items.append(("and",))
+        elif w in ("نیم", "نیمه"):
+            items.append(("half",))
+        elif w in _FA_WORD_NUM:
+            items.append(("v", float(_FA_WORD_NUM[w]), False))
         elif w in _FA_WORD_SCALE:
-            base = (cur or 1) + (0.5 if half else 0)
-            total += base * _FA_WORD_SCALE[w]
-            cur, half, used = 0.0, False, True
+            items.append(("s", _FA_WORD_SCALE[w]))
         else:
             break
-    if not used:
-        return None
-    return total + cur + (0.5 if half else 0)
+    return _combine(items)
 
 
 _APPROX = ("حدود", "تقریبا", "نزدیک", "بیش", "بیشتر", "بالای", "کمتر", "زیر", "از", "به")
@@ -250,17 +303,117 @@ def _spelled_number(t):
     return _words_number(words)
 
 
-def parse_number(s):
-    """اولین عدد یک متن را برمی‌گرداند (float) یا None اگر عددی نبود. هیچ عددی حدس زده نمی‌شود.
+_MULT_D = dict(_MULT)
+_FOLD_APPROX = frozenset(fold(w) for w in _APPROX)
+_SCALE_SUFFIX = ("تا", "ی", "ای")
+_STRICT_TOK = re.compile(r"(?P<sp>\s+)|(?P<num>(?:[.٫](?=\d))?\d+(?:[.,/'٫٬،]\d+)*)|(?P<word>[^\W\d_]+)"
+                         r"|(?P<pct>[%٪])|(?P<sign>[-−+](?=[.٫]?\d))")
+_AMBIGUOUS_ALONE = frozenset(["نه", "یه", "سی", "صد", "ده"])
+
+
+def _strict_word(w, attached):
+    """One letter run of a strict number: an item tuple, ('approx',), ('unit',) or None (unknown)."""
+    f = fold(w)
+    if f == "و":
+        return ("and",)
+    if f in ("نیم", "نیمه"):
+        return ("half",)
+    if f in _FA_WORD_NUM:
+        return ("v", float(_FA_WORD_NUM[f]), False)
+    if f in _FA_WORD_SCALE:
+        return ("s", _FA_WORD_SCALE[f])
+    if f in _MULT_D:
+        if f in _TOUCH_ONLY and not attached:
+            return None
+        return ("s", _MULT_D[f])
+    for sw, sc in _FA_WORD_SCALE.items():  # «هزارتا»، «میلیونی»
+        if f.startswith(sw) and f[len(sw):] in _SCALE_SUFFIX:
+            return ("s", sc)
+    if f in _FOLD_APPROX:
+        return ("approx",)
+    if f in _UNIT_WORDS:
+        return ("unit",)
+    return None
+
+
+def _parse_strict(t):
+    """The whole text must be one number (see parse_number strict=True); t is normalized, ASCII digits."""
+    t = normalize(t, diacritics=True).replace(ZWNJ, " ").lower()
+    items, pos, neg, attached = [], 0, False, False
+    while pos < len(t):
+        m = _STRICT_TOK.match(t, pos)
+        if not m:
+            return None
+        pos = m.end()
+        kind = m.lastgroup
+        if kind == "sp":
+            attached = False
+            continue
+        if kind == "sign":
+            if items:
+                return None
+            neg = m.group(0) in ("-", "−")
+            attached = False
+            continue
+        if kind == "num":
+            if items and items[-1][0] == "v":
+                return None
+            v = _num_core(m.group("num"))
+            if v is None:
+                return None
+            items.append(("v", v, True))
+            attached = True
+            continue
+        if kind == "pct":
+            items.append(("pct",))
+            attached = False
+            continue
+        it = _strict_word(m.group(0), attached and items and items[-1][0] == "v" and items[-1][2])
+        if it is None:
+            return None
+        items.append(it)
+        attached = False
+    while items and items[0][0] in ("approx", "pct"):
+        items.pop(0)
+    while items and items[-1][0] in ("unit", "pct"):
+        items.pop()
+    if not items or any(it[0] in ("approx", "unit", "pct") for it in items):
+        return None
+    if neg and not (items[0][0] == "v" and items[0][2]):
+        return None
+    if len(items) == 1 and items[0][0] == "half":
+        return None
+    if len(items) == 1 and items[0][0] == "v" and not items[0][2] \
+            and any(fold(w) in _AMBIGUOUS_ALONE for w in t.split()):
+        return None  # «نه» = no, «یه» = a, «سی/صد/ده» are also ordinary words: too ambiguous alone
+    val = _combine(items, strict=True)
+    if val is None:
+        return None
+    return -val if neg else val
+
+
+def parse_number(s, strict=False):
+    """یک عدد را از متن برمی‌گرداند (float) یا None اگر عددی نبود. هیچ عددی حدس زده نمی‌شود.
 
     می‌فهمد: «۱٫۲ هزار»، «1.2K»، «۳ میلیون»، «12,400»، «۱۲٬۴۰۰»، «4.5M views»، «۱۲ هزار بازدید»، «1.2B»،
-    «۱/۵ میلیون» (اسلش به‌جای ممیز)، «45%»، «−۳»، و عدد حروفی ساده: «یک و نیم میلیون»، «سیصد هزار»، «هزار».
+    «۱/۵ میلیون» (اسلش به‌جای ممیز)، «45%»، «−۳»، «٫۵»، و عدد حروفی: «یک و نیم میلیون»، «نیم میلیون»،
+    «دو میلیون و نیم»، «سیصد هزار»، «هزار». پسوند تک‌حرفی m و b فقط وقتی چسبیده به عدد است ضرب می‌شود
+    («4.5M» بله، «5 m» نه: m می‌تواند دقیقه یا متر باشد).
+
+    strict=False (پیش‌فرض): اولین عدد متن، و بقیه‌ی متن نادیده گرفته می‌شود (برای متن آزاد).
+    strict=True (برای عددی که کاربر وارد کرده): کل متن باید یک عدد باشد، وگرنه None. واژه‌ی تقریب در اول
+    («حدود»، «بیش از») و واحد در آخر («بازدید»، «تا»، «٪») مجاز است، و عدد رقمی و حروفی با «و» جمع
+    می‌شوند: «۱۲ هزار و ۵۰۰» = 12500، «۲ میلیون و ۳۰۰ هزار» = 2300000. بازه («بین ۵ تا ۸ هزار»، «12K-15K»)،
+    دو عدد بی «و»، زمان («8:30»)، تاریخ و هر واژه‌ی ناشناخته («زیاد ۵») = None.
     """
     if s is None:
         return None
     if isinstance(s, (int, float)) and not isinstance(s, bool):
-        return float(s)
+        f = float(s)
+        return f if math.isfinite(f) else None
     t = normalize(str(s), digits="ascii")
+    if strict:
+        return _parse_strict(t)
     t = t.replace(ZWNJ, " ")
     m = _NUM.search(t)
     if not m:
@@ -268,16 +421,21 @@ def parse_number(s):
     val = _num_core(m.group("num"))
     if val is None:
         return None
-    rest = t[m.end():].lstrip().lower()
+    tail = t[m.end():].lower()
+    rest = tail.lstrip()
     for word, mult in _MULT:
-        if rest.startswith(word):
-            after = rest[len(word):len(word) + 1]
-            # a short suffix must end there ("4.5M views" yes, "5 minutes" / «۵ کانال» no);
-            # long Persian words may take a suffix («هزارتا»، «میلیونی»)
-            if after and after.isalpha() and (word.isascii() or len(word) < 3):
+        if word in _TOUCH_ONLY:
+            if not tail.startswith(word):
                 continue
-            val *= mult
-            break
+        elif not rest.startswith(word):
+            continue
+        after = rest[len(word):len(word) + 1]
+        # a short suffix must end there ("4.5M views" yes, "5 minutes" / «۵ کانال» no);
+        # long Persian words may take a suffix («هزارتا»، «میلیونی»)
+        if after and after.isalpha() and (word.isascii() or len(word) < 3):
+            continue
+        val *= mult
+        break
     if m.group("sign") in ("-", "−"):
         val = -val
     return val
@@ -370,7 +528,7 @@ def parse_timestamp(s):
     if s is None:
         return None
     if isinstance(s, (int, float)) and not isinstance(s, bool):
-        return float(s) if s >= 0 else None
+        return float(s) if math.isfinite(s) and s >= 0 else None
     t = normalize(str(s), digits="ascii").replace("٫", ".").replace(",", ".").strip().lower()
     if not t:
         return None
@@ -406,7 +564,10 @@ def fmt_timestamp(seconds, style="yt", fa_digits=False):
     """ثانیه را به متن زمان تبدیل می‌کند.
     style='yt': «4:05» یا «1:04:05» (برای فصل‌ها و توضیحات یوتیوب، ثانیه رو به پایین گرد می‌شود)؛
     'srt': «00:04:05,250»؛ 'vtt': «00:04:05.250»؛ 'clock': «00:04:05». fa_digits=True: با رقم فارسی."""
-    seconds = max(0.0, float(seconds or 0))
+    seconds = float(seconds or 0)
+    if not math.isfinite(seconds):
+        raise ValueError("time is not finite")
+    seconds = max(0.0, seconds)
     if style in ("srt", "vtt"):
         ms = int(round(seconds * 1000))
         h, ms = divmod(ms, 3600000)
@@ -429,17 +590,29 @@ def fmt_timestamp(seconds, style="yt", fa_digits=False):
 
 Cue = namedtuple("Cue", "start end text")
 
-# Markup inside cue text: HTML-ish tags (<i>, <c>, <00:00:01.000>) and SSA override blocks ({\an8}).
-_TAGS = re.compile(r"<[^>]*>|\{[^}]*\}")
+# Known subtitle markup only: VTT/SRT tags (<i>, <b>, <u>, <s>, <c.class>, <v Name>, <lang fa>, <ruby>,
+# <rt>, <font color=…>, <br>), karaoke timestamps (<00:00:01.000>) and SSA override blocks ({\an8}).
+# Anchored to the tag names so real text survives: «x < 10 و y > 3»، «{name}»، «List<int>».
+_TAGS = re.compile(r"</?(?:i|b|u|s|c|ruby|rt|br)(?:\.[\w.-]*)?\s*/?>"   # <i> </b> <c.colorE5E5E5> <br/>
+                   r"|</(?:v|lang|font)>"
+                   r"|<(?:v|lang)(?:\.[\w.-]*)?\s[^<>]*>"              # <v Al> <lang fa>
+                   r"|<font\s+[a-z-]+\s*=[^<>]*>"                        # <font color="#ff0">
+                   r"|<\d{1,2}:\d{2}(?::\d{2})?[.,]\d{3}>|\{\\[^}]*\}", re.I)
+# YouTube auto (rolling) captions carry karaoke timestamps or <c> tags; only those get line dedupe.
+_AUTO_VTT = re.compile(r"<\d{2}:\d{2}:\d{2}\.\d{3}>|<c[.>]")
 _TIMING = re.compile(r"^\s*(\d[\d:.,٫]*)\s*-->\s*(\d[\d:.,٫]*)")
 # Rolling-caption snapshot cues (YouTube auto VTT) are ~10 ms long and only repeat the line above.
 _MIN_VTT_CUE = 0.05
 
 
-def clean_cue_text(text, normalized=True):
-    """متن یک خط زیرنویس را تمیز می‌کند: برچسب‌ها (<i>، <c>، <00:00:01.000>، {\\an8}) و &nbsp; و… حذف
-    و (پیش‌فرض) با normalize یکدست می‌شود."""
-    text = html.unescape(_TAGS.sub("", text or ""))
+def clean_cue_text(text, normalized=True, strip_tags=True):
+    """متن یک خط زیرنویس را تمیز می‌کند: برچسب‌های شناخته‌شده‌ی زیرنویس (<i>، <b>، <c>، <v …>، <font …>،
+    <00:00:01.000>، {\\an8}) و &nbsp; و… حذف و (پیش‌فرض) با normalize یکدست می‌شود. متن واقعی مثل
+    «x < 10»، «{name}» یا «List<int>» دست نمی‌خورد. strip_tags=False: برچسبی حذف نشود (متن JSON ویسپر)."""
+    text = text or ""
+    if strip_tags:
+        text = _TAGS.sub("", text)
+    text = html.unescape(text)
     return normalize(text) if normalized else text.strip()
 
 
@@ -447,7 +620,10 @@ def _num(v):
     if isinstance(v, bool) or v is None:
         raise ValueError("no time")
     if isinstance(v, (int, float)):
-        return float(v)
+        f = float(v)
+        if not math.isfinite(f) or f < 0:
+            raise ValueError("bad time %r" % (v,))
+        return f
     t = parse_timestamp(v)
     if t is None:
         raise ValueError("bad time %r" % (v,))
@@ -495,7 +671,7 @@ def _word_cues(words, normalized):
             a, b = _seg_times(w)
         except (ValueError, TypeError):
             continue
-        t = clean_cue_text(str(_word_text(w)), normalized)
+        t = clean_cue_text(str(_word_text(w)), normalized, strip_tags=False)
         if t:
             out.append(Cue(a, max(a, b), t))
     return out
@@ -544,7 +720,7 @@ def _load_json(d, words, normalized):
         text = s.get("text")
         if text is None and ws:
             text = _join_words(ws)
-        t = clean_cue_text(str(text or ""), normalized)
+        t = clean_cue_text(str(text or ""), normalized, strip_tags=False)
         if t:
             out.append(Cue(a, max(a, b), t))
     return out
@@ -559,11 +735,12 @@ def parse_cues(raw, kind=None, words=False, normalized=True):
         try:
             cues = _load_json(json.loads(raw), words, normalized)
             return sorted(cues, key=lambda c: (c.start, c.end))
-        except ValueError:
+        except (ValueError, RecursionError):
             if kind == "json":
                 return []
             # not JSON after all - try it as srt / vtt
     is_vtt = kind == "vtt" or (kind is None and raw.lstrip().startswith("WEBVTT"))
+    auto = is_vtt and bool(_AUTO_VTT.search(raw))
     lines = raw.splitlines()
     cues, cur = [], None
     for i, line in enumerate(lines):
@@ -594,8 +771,11 @@ def parse_cues(raw, kind=None, words=False, normalized=True):
         for a, b, t in cues:
             if b - a < _MIN_VTT_CUE:
                 continue
-            while t and last is not None and t[0] == last:
-                t = t[1:]
+            # a rolling carry-over cue holds the carried line plus a new one; a single line equal to the
+            # previous one in a hand-made VTT is real repeated speech («آره»، «[موسیقی]») and stays
+            if auto or len(t) > 1:
+                while t and last is not None and t[0] == last:
+                    t = t[1:]
             if t:
                 kept.append((a, b, t))
                 last = t[-1]
@@ -604,13 +784,48 @@ def parse_cues(raw, kind=None, words=False, normalized=True):
     return sorted(out, key=lambda c: (c.start, c.end))
 
 
+def decode_bytes(data):
+    """بایت‌های یک فایل متنی را به متن تبدیل می‌کند و رمزگذاری را خودش تشخیص می‌دهد: BOM (UTF-8 یا UTF-16)،
+    UTF-16 بی BOM (از روی بایت‌های صفر)، UTF-8، و بعد ویندوز فارسی (cp1256، زیرنویس‌ها و CSVهای قدیمی).
+    در cp1256 «ي» و «ك» عربی به «ی» و «ک» فارسی برمی‌گردند. اگر هیچ‌کدام نشد، UTF-8 با جایگزینی نویسه‌ی خراب."""
+    if isinstance(data, str):
+        return data
+    data = bytes(data or b"")
+    if data[:3] == b"\xef\xbb\xbf":
+        return data[3:].decode("utf-8", errors="replace")
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        try:
+            return data.decode("utf-16")
+        except UnicodeDecodeError:
+            pass
+    sample = data[:4000]
+    if len(sample) >= 4:
+        half = len(sample) // 2
+        nul_odd = sample[1::2].count(0)   # ASCII in UTF-16-LE: "a\0"
+        nul_even = sample[0::2].count(0)  # ASCII in UTF-16-BE: "\0a"
+        for enc, hit, miss in (("utf-16-le", nul_odd, nul_even), ("utf-16-be", nul_even, nul_odd)):
+            if hit >= 0.2 * half and hit > 4 * miss:
+                try:
+                    return data[:len(data) - len(data) % 2].decode(enc)
+                except UnicodeDecodeError:
+                    pass
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    try:
+        return data.decode("cp1256").translate(_LETTERS)
+    except UnicodeDecodeError:
+        return data.decode("utf-8", errors="replace")
+
+
 def load_cues(path, words=False, normalized=True):
     """فایل SRT، VTT (همراه با زیرنویس خودکار یوتیوب، NOTE و شناسه‌ی cue) یا JSON ویسپر (dict با
     segments، فهرست ساده، سطح کلمه، whisper.cpp، chunks) را می‌خواند و فهرست مرتب Cue(start, end, text)
-    برمی‌گرداند. BOM مشکلی ندارد؛ cue خالی حذف می‌شود و عدد تنها متن حساب می‌شود.
+    برمی‌گرداند. رمزگذاری با decode_bytes تشخیص داده می‌شود (UTF-8، UTF-16، ویندوز فارسی cp1256)؛ BOM مشکلی ندارد؛ cue خالی حذف می‌شود و عدد تنها متن حساب می‌شود.
     خطای نبودن فایل یا پوشه بودن مسیر (OSError) را خود ابزار باید بگیرد."""
-    with open(path, encoding="utf-8-sig", errors="replace") as fh:
-        raw = fh.read()
+    with open(path, "rb") as fh:
+        raw = decode_bytes(fh.read())
     kind = "json" if str(path).lower().endswith(".json") else None
     cues = parse_cues(raw, kind=kind, words=words, normalized=normalized)
     if not cues and kind == "json":

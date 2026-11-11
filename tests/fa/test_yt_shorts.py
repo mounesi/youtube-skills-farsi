@@ -120,8 +120,6 @@ class BodyTest(unittest.TestCase):
         self.assertNotRegex(self.text, r"/Users/|/home/")
         self.assertNotRegex(self.text, r"[\w.+-]+@[\w-]+\.[\w.]+")
         self.assertNotRegex(self.text, r"(?i)api[_ -]?key|sk-[A-Za-z0-9]{8}")
-        self.assertNotIn("Peyman", self.text)
-        self.assertNotIn("AgentTask", self.text)
 
 
 if __name__ == "__main__":

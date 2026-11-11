@@ -136,10 +136,12 @@ class ChaptersTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertGreaterEqual(len(json.loads(r.stdout)["chapters"]), 3)
 
-    def test_missing_file_still_prints_doc_and_exits_1(self):
+    def test_missing_file_is_bad_input_exit_2(self):
+        # Farsi pack contract (SKILL.md): 2 = bad input, message on stderr, stdout kept clean for --json.
         r = self.run_tool(os.path.join(self.dir, "nope.srt"))
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("chapters.py", r.stdout)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("nope.srt", r.stderr)
+        self.assertEqual(r.stdout, "")
 
     def test_text_mode_still_works(self):
         p = os.path.join(self.dir, "t.srt")

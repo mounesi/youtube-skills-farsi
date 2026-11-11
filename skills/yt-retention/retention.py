@@ -8,7 +8,8 @@
     python3 -I retention.py retention.csv --axis pct --duration 600      # وقتی محور مبهم است
     python3 -I retention.py short.csv --kind short                       # شورت/ریلز (۳ ثانیه‌ی اول)
 
-گرفتن فایل: Studio → ویدیو → Analytics → Engagement (تعامل) → نمودار ماندگاری مخاطب → آیکن دانلود.
+گرفتن فایل: Studio ← Content (محتوا) ← ویدیو ← Analytics ← Engagement (تعامل) ← کارت «ماندگاری مخاطب» ←
+SEE MORE (حالت پیشرفته / Advanced mode) ← بالای صفحه: Export current view ← CSV.
 دو ستون لازم است: موقعیت (درصد یا ثانیه یا mm:ss) و درصد بیننده‌هایی که هنوز نگاه می‌کنند. سرستون
 انگلیسی و فارسی («زمان ویدیو»، «درصد بینندگان»…)، رقم فارسی، ٪ و ٫ و جداکننده‌ی , ; یا Tab همه خوانده می‌شوند.
 
@@ -20,14 +21,14 @@
 --duration برای محور درصدی لازم است تا موقعیت به زمان تبدیل شود. --compare دو ویدیو را کنار هم می‌گذارد.
 هیچ عددی ساخته نمی‌شود: هر عدد از خود فایل می‌آید.
 """
-import argparse, csv, io, json, os, re, sys
+import argparse, csv, io, json, math, os, re, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _fatext as fa  # noqa: E402
 
 SHORT_MAX_S = 180.0      # YouTube Shorts: up to 3 minutes
 LONG_HOOK_S = 30.0       # upstream heuristic: hook = first 30 s
-SHORT_HOOK_S = 3.0       # Shorts/Reels are judged in the first 1-3 s
+SHORT_HOOK_S = 3.0       # heuristic of this tool (IG skip rate = <3 s; YouTube publishes no window)
 HEALTHY_HOOK = 25.0      # upstream heuristic for long videos
 CLIFF_MIN = 0.8          # a drop bigger than this between two points counts as a cliff (upstream)
 BIG_CLIFF = 3.0          # heuristic of this tool: a cliff worth fixing on its own
@@ -54,21 +55,37 @@ def _num(c):
     if c is None:
         return None
     if isinstance(c, (int, float)) and not isinstance(c, bool):
-        return float(c)
-    c = fa.normalize(str(c), digits="ascii")
-    c = re.sub(r"[%٪\s ]", "", c)
-    if not c or not re.search(r"\d", c):
+        v = float(c)
+    else:
+        c = fa.normalize(str(c), digits="ascii")
+        c = re.sub(r"[%٪\s ]", "", c)
+        if not c or not re.search(r"\d", c):
+            return None
+        if ":" in c:
+            v = fa.parse_timestamp(c)
+        elif not _NUMERIC.match(c):
+            return None
+        else:
+            v = fa.parse_number(c)
+    # a 400-digit cell is float('inf'): unreadable, not a number to report
+    return v if v is not None and math.isfinite(v) else None
+
+
+def _comma_decimal(c):
+    """'100,000' -> 100.0 when ',' is the decimal mark (a single comma, no '.' and no other grouping mark)."""
+    t = re.sub(r"[%٪\s ]", "", fa.normalize(str(c), digits="ascii"))
+    if not re.fullmatch(r"[-−]?\d+,\d+", t):
         return None
-    if ":" in c:
-        return fa.parse_timestamp(c)
-    if not _NUMERIC.match(c):
-        return None
-    return fa.parse_number(c)
+    v = float(t.replace("−", "-").replace(",", "."))
+    return v if math.isfinite(v) else None
+
+
+_NOT_CSV = "این فایل CSV نیست (عکس یا اکسل است)؛ از Studio خروجی CSV بگیر: %s"
 
 
 def _decode(data):
     if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
-        return data.decode("utf-16")
+        return data.decode("utf-16", errors="replace")
     try:
         return data.decode("utf-8-sig")
     except UnicodeDecodeError:
@@ -111,17 +128,31 @@ def load_csv(path, info=None):
     If `info` is a dict it gets 'header' (position column name), 'ret_header', 'colon' (mm:ss seen)
     and 'scaled' (retention given as 0..1 and turned into percent)."""
     with open(path, "rb") as fh:
-        text = _decode(fh.read())
-    reader = csv.reader(io.StringIO(text), delimiter=_delimiter(text))
-    table = [r for r in reader if any(c.strip() for c in r)]
-    header_row = None
+        data = fh.read()
+    # a PNG/JPEG screenshot or an .xlsx (zip) passed as the CSV
+    if data[:8] == b"\x89PNG\r\n\x1a\n" or data[:4] == b"PK\x03\x04" or data[:3] == b"\xff\xd8\xff":
+        raise DataError(_NOT_CSV % path)
+    if data[:2] not in (b"\xff\xfe", b"\xfe\xff") and b"\x00" in data:
+        raise DataError(_NOT_CSV % path)
+    try:
+        text = _decode(data)
+        # newline=None: '\r' (old Excel for Mac) and '\r\n' line ends both read as '\n'
+        reader = csv.reader(io.StringIO(text, newline=None), delimiter=_delimiter(text))
+        table = [r for r in reader if any(c.strip() for c in r)]
+    except (csv.Error, UnicodeError) as e:
+        raise DataError("فایل CSV خراب است یا CSV نیست؛ دوباره از Studio خروجی CSV بگیر: %s" % path) from e
+    # the header is the last non-data row before the first data row (a row with 2+ numeric cells);
+    # leading text columns (Content, Video title) no longer make data rows look like headers
+    pre = []
     for r in table:
-        if len(r) >= 2 and _num(r[0]) is not None and any(_num(c) is not None for c in r[1:]):
+        if len(r) >= 2 and sum(_num(c) is not None for c in r) >= 2:
             break
         if len(r) >= 2:
-            header_row = [c.strip() for c in r]
+            pre.append([c.strip() for c in r])
+    keyed = [h for h in pre if any(_has(c, POS_KEYS) or _has(c, RET_KEYS) for c in h)]
+    header_row = (keyed or pre or [None])[-1]
     pi, ri = _pick_columns(header_row)
-    rows, colon = [], False
+    rows, colon, pct_cells = [], False, False
     for r in table:
         if len(r) <= max(pi, ri):
             continue
@@ -130,7 +161,24 @@ def load_csv(path, info=None):
             continue
         if ":" in r[pi]:
             colon = True
-        rows.append((x, y))
+        if "%" in r[pi] or "٪" in r[pi]:
+            pct_cells = True
+        rows.append((x, y, r[ri]))
+    ret_name = header_row[ri] if header_row and ri < len(header_row) else None
+    col = "«%s»" % ret_name if ret_name else "ستون %s" % fa.to_fa_digits(str(ri + 1))
+    if rows and max(y for _, y, _ in rows) > 1000:
+        # '100,000' in a comma-decimal file with 3 decimals is 100.0, not a hundred thousand
+        again = [(x, _comma_decimal(c) if "," in c else y, c) for x, y, c in rows]
+        if all(y is not None and 0 <= y <= 1000 for _, y, _ in again):
+            rows = again
+        else:
+            bad = max(rows, key=lambda t: t[1])[2].strip()
+            raise DataError("ماندگاری در %s بیشتر از ۱۰۰۰٪ خوانده شد (مثلاً «%s»)؛ این عدد درصد بیننده نیست. "
+                            "ستون درست را از Studio خروجی بگیر: %s" % (col, bad, path))
+    neg = [c for _, y, c in rows if y < 0]
+    if neg:
+        raise DataError("مقدار منفی برای ماندگاری معنا ندارد: «%s» در %s (%s)" % (neg[0].strip(), col, path))
+    rows = [(x, y) for x, y, _ in rows]
     rows.sort(key=lambda t: t[0])
     scaled = False
     if rows and rows[0][1] <= 1.5 and max(y for _, y in rows) <= 3.0:
@@ -138,8 +186,9 @@ def load_csv(path, info=None):
         scaled = True
     if info is not None:
         info["header"] = header_row[pi] if header_row and pi < len(header_row) else None
-        info["ret_header"] = header_row[ri] if header_row and ri < len(header_row) else None
+        info["ret_header"] = ret_name
         info["colon"] = colon
+        info["pct_cells"] = pct_cells
         info["scaled"] = scaled
     return rows
 
@@ -160,15 +209,17 @@ def _seconds(v):
     return f
 
 
-def detect_axis(xs, dur=None, forced=None, header=None, colon=False):
-    """-> (pct_axis, reason)."""
+def detect_axis(xs, dur=None, forced=None, header=None, colon=False, pct_cells=False):
+    """-> (pct_axis, reason). reason "ratio" means a 0..1 position axis: multiply positions by 100.
+    Order: --axis, mm:ss cells, % marks (header or cells), explicit seconds in the header, --duration,
+    a 0..1 ratio axis, a plain «زمان»/time header, a guess from the largest position."""
     if forced:
         return forced == "pct", "--axis"
     if colon:
         return False, "mm:ss positions"
-    if header and _has(header, PCT_MARKS):
-        return True, "header"
-    if header and (_has(header, SEC_MARKS) or _has(header, TIME_WORDS) or re.search(r"\bsec", header.lower())):
+    if pct_cells or (header and _has(header, PCT_MARKS)):
+        return True, "header" if not pct_cells else "% cells"
+    if header and (_has(header, SEC_MARKS) or re.search(r"\bsec", header.lower())):
         return False, "header"
     mx = max(xs)
     if dur:
@@ -176,6 +227,10 @@ def detect_axis(xs, dur=None, forced=None, header=None, colon=False):
             return False, "--duration"
         if abs(mx - 100.0) <= 1.0 and dur > 105:
             return True, "--duration"
+    if mx <= 1.0 and (dur or (header and "ratio" in header.lower())):
+        return True, "ratio"
+    if header and _has(header, TIME_WORDS):
+        return False, "header"
     return mx <= 100.5, "guess"
 
 
@@ -195,15 +250,41 @@ def analyze(path, dur=None, axis=None, kind=None, hook_window=None, notes=None):
     notes = notes if notes is not None else []
     info = {}
     rows = load_csv(path, info)
+    name = os.path.basename(path)
+    # a 0 at the very start (some API exports) is not a real start: leaving it in would make up a 100% start
+    lead = 0
+    while lead < len(rows) and rows[lead][1] == 0:
+        lead += 1
+    if rows and lead == len(rows):
+        raise DataError("همه‌ی نقطه‌های ماندگاری صفرند: %s" % path)
+    if lead:
+        notes.append("%s: %s نقطه‌ی اول ماندگاری صفر داشت و کنار گذاشته شد."
+                     % (name, fa.to_fa_digits(str(lead), True)))
+        rows = rows[lead:]
     if len(rows) < 8:
         raise DataError("از این فایل حتی ۸ نقطه‌ی داده خوانده نشد: %s" % path)
+    xs = [r[0] for r in rows]
+    header = info.get("header")
+    pct_axis, why = detect_axis(xs, dur, axis, header, info.get("colon"), info.get("pct_cells"))
+    if why == "ratio":
+        rows = [(x * 100.0, y) for x, y in rows]
+        notes.append("%s: موقعیت به شکل ۰ تا ۱ (نسبت طول ویدیو) بود؛ در ۱۰۰ ضرب شد و محور درصدی شد." % name)
     xs = [r[0] for r in rows]; ys = [r[1] for r in rows]
-    pct_axis, why = detect_axis(xs, dur, axis, info.get("header"), info.get("colon"))
-    name = os.path.basename(path)
-    if why == "guess":
-        notes.append("%s: محور را %s فرض کردم (بیشترین موقعیت %s)؛ برای تغییرش --axis pct یا --axis seconds بده."
-                     % (name, "درصدی" if pct_axis else "ثانیه", fa.to_fa_digits("%g" % max(xs), True)))
-    if info.get("scaled"):
+    if why in ("guess", "header"):
+        notes.append("%s: محور را %s فرض کردم (%s، بیشترین موقعیت %s)؛ برای تغییرش --axis pct یا --axis seconds بده."
+                     % (name, "درصدی" if pct_axis else "ثانیه",
+                        "از روی سرستون «%s»" % header if why == "header" else "حدس",
+                        fa.to_fa_digits("%g" % max(xs), True)))
+    elif why == "--duration" and pct_axis and header and _has(header, TIME_WORDS):
+        notes.append("%s: سرستون «%s» زمان را نشان می‌دهد، اما با --duration محور را درصدی فرض کردم "
+                     "(بیشترین موقعیت ۱۰۰ است، نه طول ویدیو)؛ برای تغییرش --axis seconds بده." % (name, header))
+    ret_header = info.get("ret_header") or ""
+    relative = _has(ret_header, ("relative", "نسبی"))
+    if relative:
+        notes.append("%s: ستون «%s» ماندگاری نسبی است (مقایسه با ویدیوهای مشابه)، نه سهم بیننده‌هایی که هنوز "
+                     "نگاه می‌کنند؛ عددهای این گزارش درصد واقعی بیننده نیستند. از Studio ستون ماندگاری مطلق "
+                     "(Absolute audience retention) را خروجی بگیر." % (name, ret_header))
+    elif info.get("scaled"):
         notes.append("%s: ماندگاری به شکل ۰ تا ۱ بود؛ در ۱۰۰ ضرب شد." % name)
     length = dur if dur else (None if pct_axis else max(xs))
     if kind is None:
@@ -222,10 +303,17 @@ def analyze(path, dur=None, axis=None, kind=None, hook_window=None, notes=None):
         return sec / dur * 100.0 if dur else None
 
     hw = hook_window if hook_window else (SHORT_HOOK_S if kind == "short" else LONG_HOOK_S)
+    if hook_window and length is not None and hw >= length:
+        raise DataError("--hook-window (%s ثانیه) از طول ویدیو (%s ثانیه) کمتر نیست؛ بازه‌ی هوک باید کوتاه‌تر از خود ویدیو باشد."
+                        % (fa.to_fa_digits("%g" % hw, True), fa.to_fa_digits("%g" % length, True)))
     cutoff = to_x(hw)
+    hook_s = hw
     if cutoff is None:
         cutoff = 10.0  # upstream: first 10% when the axis is percent and the length is unknown
-    start = ys[0] or 100.0
+        hook_s = None
+        notes.append("%s: محور درصدی است و طول ویدیو معلوم نیست؛ نشت هوک روی ۱۰٪ اول ویدیو حساب شد، نه %s ثانیه. "
+                     "برای پنجره‌ی درست --duration بده." % (name, fa.to_fa_digits("%g" % hw)))
+    start = ys[0]
     hook_end = min([y for x, y in rows if x <= cutoff] + [_interp(rows, cutoff)])
     hook_leak = start - hook_end
 
@@ -236,20 +324,25 @@ def analyze(path, dur=None, axis=None, kind=None, hook_window=None, notes=None):
         drops.append((d / span, xs[i - 1], xs[i], d))
     # CLIFFS: filter by size first, then the five biggest by amount lost (upstream fix).
     # Drops that start inside the hook window are the hook leak, so they are not listed twice.
-    big = sorted((t for t in drops if t[3] > CLIFF_MIN and t[1] >= cutoff),
+    # A drop that the next one or two points win back (a ±1.5 zig-zag on a jagged curve) is noise, not a cliff.
+    def kept(i):  # drops[i] goes from ys[i] to ys[i+1]
+        after = ys[i + 2:i + 4]
+        return not after or ys[i] - max(after) > CLIFF_MIN
+    big = sorted((t for i, t in enumerate(drops) if t[3] > CLIFF_MIN and t[1] >= cutoff and kept(i)),
                  key=lambda t: t[3], reverse=True)[:5]
     cliffs = [{"from": round(a1, 2), "to": round(b1, 2), "lost": round(d, 2),
                "at_seconds": round(at(a1), 1) if at(a1) is not None else None}
               for _, a1, b1, d in big]
     cliff_set = {(a1, b1) for _, a1, b1, _ in big}
-    # SLIDE: net loss over the time it took, after the hook, leaving out the cliffs (span-weighted)
-    # Jumps UP (rewatch / loop spikes, common at the end of a Short) are listed apart, not netted into the slide.
+    # SLIDE: net loss over the time it took, after the hook, leaving out the cliffs (span-weighted).
+    # Every step counts, rises too: on a jagged curve the small rises cancel the small drops.
+    # Only a big jump UP (>= BIG_CLIFF: a rewatch / loop spike, common at the end of a Short) is left out,
+    # so a Short's loop does not hide the real slide. All jumps up are still listed as bumps.
     bumps = [{"from": round(x0, 2), "to": round(x1, 2), "gained": round(-d, 2),
               "at_seconds": round(at(x0), 1) if at(x0) is not None else None}
              for _, x0, x1, d in drops if -d > CLIFF_MIN]
-    bump_set = {(b["from"], b["to"]) for b in bumps}
-    mid = [(d, x1 - x0) for _, x0, x1, d in drops if x0 > cutoff and (x0, x1) not in cliff_set
-           and (round(x0, 2), round(x1, 2)) not in bump_set]
+    mid = [(d, x1 - x0) for _, x0, x1, d in drops if x0 >= cutoff and (x0, x1) not in cliff_set
+           and -d < BIG_CLIFF]
     tot_span = sum(s for _, s in mid)
     slide = sum(d for d, _ in mid) / tot_span if tot_span > 0 else 0
     slide_total = max(0.0, sum(d for d, _ in mid))
@@ -259,25 +352,31 @@ def analyze(path, dur=None, axis=None, kind=None, hook_window=None, notes=None):
     elif dur:
         per_sec = slide * 100.0 / dur
     cliff_after = sum(c["lost"] for c in cliffs)
+    # the three buckets together cannot be more than the curve really fell
+    cap = max(0.0, start - min(ys))
+    cliff_bucket = min(cliff_after, max(0.0, cap - max(0.0, hook_leak)))
+    slide_total = min(slide_total, max(0.0, cap - max(0.0, hook_leak) - cliff_bucket))
     area = sum((x1 - x0) * (y0 + y1) / 2.0 for (x0, y0), (x1, y1) in zip(rows, rows[1:]))
     avg = area / (xs[-1] - xs[0]) if xs[-1] > xs[0] else ys[0]
     xmax = 100.0 if pct_axis else xs[-1]
     marks = {str(q): round(_interp(rows, xs[0] + (xmax - xs[0]) * q / 100.0), 2) for q in (25, 50, 75)}
 
-    buckets = {"hook": round(hook_leak, 2), "cliff": round(cliff_after, 2), "slide": round(slide_total, 2)}
+    buckets = {"hook": round(hook_leak, 2), "cliff": round(cliff_bucket, 2), "slide": round(slide_total, 2)}
     main = max(buckets, key=lambda k: buckets[k])
+    slide_flat = (per_sec is not None and per_sec * 60 <= FLAT_SLIDE_PER_MIN or
+                  per_sec is None and slide <= FLAT_SLIDE_PER_MIN / 10.0)
     fine = (kind == "long" and hook_leak < HEALTHY_HOOK and
-            not any(c["lost"] >= BIG_CLIFF for c in cliffs) and
-            (per_sec is not None and per_sec * 60 <= FLAT_SLIDE_PER_MIN or
-             per_sec is None and slide <= FLAT_SLIDE_PER_MIN / 10.0))
+            not any(c["lost"] >= BIG_CLIFF for c in cliffs) and slide_flat)
     if all(v <= 0 for v in buckets.values()):
         main = None
     return {"file": name, "points": len(rows), "start": start, "end": ys[-1],
             "axis": "pct" if pct_axis else "seconds", "kind": kind,
             "duration": round(length, 1) if length is not None else None,
-            "hook_window_s": hw, "hook_leak": round(hook_leak, 2), "cliffs": cliffs, "bumps": bumps[:5],
+            "hook_window_s": hook_s, "hook_window_pct": round(cutoff, 2) if pct_axis else None,
+            "hook_leak": round(hook_leak, 2), "cliffs": cliffs, "bumps": bumps[:5],
             "slide_per_unit": round(slide, 3),
             "slide_per_minute": round(per_sec * 60, 2) if per_sec is not None else None,
+            "slide_flat": bool(slide_flat),
             "average": round(avg, 2), "at_pct": marks,
             "diagnosis": {"main": main, "lost": buckets, "fine": bool(fine)}, "said": {},
             "_rows": rows, "_cutoff": cutoff}
@@ -330,8 +429,6 @@ def where(c):
 
 
 def hook_text(res):
-    if res["kind"] == "short":
-        return "%s ثانیه‌ی اول" % n(res["hook_window_s"], 0)
     if res["axis"] == "pct" and not res["duration"]:
         return "۱۰٪ اول ویدیو"
     return "%s ثانیه‌ی اول" % n(res["hook_window_s"], 0)
@@ -357,7 +454,7 @@ def advice(res):
     out.append("بزرگ‌ترین نشت: %s (%s واحد درصد از دست رفت)" % (LABEL[d["main"]], n(lost)))
     if d["main"] == "hook":
         if res["kind"] == "short":
-            out.append("یک تغییر: فریم صفر را عوض کن. در شورت و ریلز ۱ تا ۳ ثانیه‌ی اول تصمیم می‌گیرد: "
+            out.append("یک تغییر: فریم صفر را عوض کن. در شورت و ریلز چند ثانیه‌ی اول تعیین‌کننده است: "
                        "متن روی صفحه + تصویر غیرمنتظره از همان فریم اول، بدون سلام و مقدمه → /yt-reel")
         else:
             out.append("یک تغییر: ۱۵ ثانیه‌ی اول اسکریپت را بازنویسی کن، نه تدوین را. همان قولی که عنوان داده "
@@ -383,7 +480,7 @@ def print_report(res, notes_unused=None):
         "درصد طول ویدیو" if res["axis"] == "pct" else "ثانیه",
         ("   طول: " + ts(res["duration"])) if res["duration"] else ""))
     if res["kind"] == "short":
-        print("  شورت/ریلز (تا ۳ دقیقه): ۱ تا ۳ ثانیه‌ی اول تعیین‌کننده است.")
+        print("  شورت/ریلز (تا ۳ دقیقه): چند ثانیه‌ی اول تعیین‌کننده است (بازه‌ی هوک این ابزار: ۳ ثانیه).")
     print()
     hl = res["hook_leak"]
     if res["kind"] == "short":
@@ -392,7 +489,9 @@ def print_report(res, notes_unused=None):
                 "عدد «Viewed vs. swiped away» را هم ببین.")
     else:
         verdict = "   [%s]" % ("سالم" if hl < HEALTHY_HOOK else "نشت دارد" if hl < 40 else "شدید")
-        rule = "زیر ۲۵٪ برای ویدیوی بلند سالم است (قاعده‌ی سرانگشتی، نه عدد رسمی یوتیوب). اول این را درست کن."
+        rule = "زیر ۲۵٪ برای ویدیوی بلند سالم است (قاعده‌ی سرانگشتی، نه عدد رسمی یوتیوب)."
+        if hl >= HEALTHY_HOOK:
+            rule += " اول این را درست کن."
     print("  نشت هوک   %s در %s رفتند%s" % (p(hl), hook_text(res), verdict))
     print("            " + rule + "\n")
     print("  پرتگاه‌ها   لحظه‌هایی که بیننده‌ها واقعاً رفتند")
@@ -409,7 +508,10 @@ def print_report(res, notes_unused=None):
         print("\n  سرازیری   " + slide_text(res))
     else:
         print("\n  سرازیری   %s در بخش میانی (بدون پرتگاه‌ها)" % slide_text(res))
-        print("            ریزش آرام و یکنواخت یعنی ریتم کند است، نه محتوای بد. وسط را کوتاه کن، بازنویسی نکن.")
+        if res["slide_flat"]:
+            print("            سرازیری ناچیز است.")
+        else:
+            print("            ریزش آرام و یکنواخت یعنی ریتم کند است، نه محتوای بد. وسط را کوتاه کن، بازنویسی نکن.")
     print("\n  میانگین تقریبی منحنی: %s   (از روی نمودار؛ عدد رسمی را از «Average percentage viewed» در Studio بردار)"
           % p(res["average"]))
     print("\n  تشخیص")
@@ -507,7 +609,7 @@ def main():
         out = {k: v for k, v in res.items() if not k.startswith("_")}
         if other:
             out["compare"] = dict(cmp, other={k: v for k, v in other.items() if not k.startswith("_")})
-        print(json.dumps(out, indent=1, ensure_ascii=False))
+        print(json.dumps(out, indent=1, ensure_ascii=False, allow_nan=False))
         return
     print_report(res)
     if other:

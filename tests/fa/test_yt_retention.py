@@ -195,6 +195,142 @@ class RetentionFaTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("اسپانسر", json.loads(r.stdout)["cliffs"][0]["line"])
 
+    # --- review fixes (Nov 2026)
+    def test_jagged_curve_has_no_made_up_slide(self):
+        rows = ["pos,ret", "0,100"] + ["%d,70" % x for x in range(1, 5)]
+        rows += ["%d,%s" % (x, "61.5" if x % 2 else "60") for x in range(5, 101)]
+        rows.append("101,61.5")
+        out = self.jrun(self.write("noisy.csv", "\n".join(rows)), "--duration", "600")
+        self.assertEqual(out["diagnosis"]["main"], "hook")
+        lost = out["diagnosis"]["lost"]
+        self.assertLessEqual(lost["hook"] + lost["cliff"] + lost["slide"], out["start"] - min(60.0, out["end"]) + 0.01)
+        self.assertEqual(out["cliffs"], [])           # ±1.5 zig-zag is noise, not cliffs
+
+    def _fa_time_rows(self, cells_pct):
+        fa = str.maketrans("0123456789.", "۰۱۲۳۴۵۶۷۸۹٫")
+        rows = ["زمان ویدیو,درصد بینندگان"]; y = 100.0
+        for x in range(0, 101):
+            if 0 < x <= 5: y -= 5
+            elif x > 5: y -= 0.3
+            if x == 40: y -= 6
+            rows.append((("%d٪,%.1f٪" if cells_pct else "%d,%.1f") % (x, y)).translate(fa))
+        return "\n".join(rows)
+
+    def test_time_header_with_percent_cells_is_pct_axis(self):
+        out = self.jrun(self.write("t1.csv", self._fa_time_rows(True)), "--duration", "600")
+        self.assertEqual(out["axis"], "pct")
+        self.assertAlmostEqual(out["cliffs"][0]["at_seconds"], 234.0, places=1)
+
+    def test_duration_beats_time_header_and_warns(self):
+        p = self.write("t2.csv", self._fa_time_rows(False))
+        r = run(p, "--duration", "600", "--json")
+        out = json.loads(r.stdout)
+        self.assertEqual(out["axis"], "pct")
+        self.assertAlmostEqual(out["cliffs"][0]["at_seconds"], 234.0, places=1)
+        self.assertIn("--axis seconds", r.stderr)
+        secs = ["زمان ویدیو,درصد بینندگان"] + ["%d,%.1f" % (x * 6, 100 - x * 0.3) for x in range(101)]
+        self.assertEqual(self.jrun(self.write("t3.csv", "\n".join(secs)))["axis"], "seconds")
+
+    def test_ratio_position_axis(self):
+        rows = ["elapsedVideoTimeRatio,audienceWatchRatio"]; y = 1.0
+        for i in range(1, 101):
+            y -= 0.004 + (0.06 if i == 40 else 0)
+            rows.append("%.2f,%.4f" % (i / 100, y))
+        p = self.write("ratio.csv", "\n".join(rows))
+        for args in ([p], [p, "--duration", "600"]):
+            out = self.jrun(*args)
+            self.assertEqual(out["axis"], "pct", args)
+            self.assertEqual(out["cliffs"][0]["from"], 39.0)
+
+    def test_short_on_pct_axis_without_duration_says_ten_percent(self):
+        rows = ["Video position (%),Absolute audience retention (%)"] + \
+               ["%d,%.1f" % (x, 100 - x * 0.5) for x in range(101)]
+        p = self.write("en.csv", "\n".join(rows))
+        r = run(p, "--kind", "short")
+        self.assertIn("۱۰٪ اول ویدیو", r.stdout)
+        self.assertNotIn("۳ ثانیه‌ی اول", r.stdout)
+        self.assertIn("--duration", r.stderr)
+        out = self.jrun(p, "--kind", "short")
+        self.assertIsNone(out["hook_window_s"])
+        self.assertEqual(out["hook_window_pct"], 10.0)
+
+    def test_malformed_files_are_farsi_errors(self):
+        ok = "\r".join(["pos,ret"] + ["%d,%d" % (x * 10, 100 - x) for x in range(30)])
+        cr = os.path.join(self.tmp.name, "cr.csv")
+        with open(cr, "w", newline="") as fh:
+            fh.write(ok)
+        self.assertEqual(self.jrun(cr)["points"], 30)    # old Excel for Mac line ends
+        bad = {"img.png": b"\x89PNG\r\n\x1a\n" + b"\x00" * 40, "nul.csv": b"pos,ret\n0,1\x00\n",
+               "big.csv": b"pos,ret\n0," + b"9" * 200000 + b"\n",
+               "u16.csv": ("pos,ret\n0,100\n").encode("utf-16") + b"x"}
+        for name, data in bad.items():
+            p = os.path.join(self.tmp.name, name)
+            with open(p, "wb") as fh:
+                fh.write(data)
+            r = run(p)
+            self.assertEqual(r.returncode, 1, name)
+            self.assertNotIn("Traceback", r.stderr, name)
+
+    def test_overflow_cell_and_duration(self):
+        rows = ["pos,ret"] + ["%d,%d" % (x * 10, 100 - x) for x in range(30)] + ["9" * 400 + ",10"]
+        p = self.write("inf.csv", "\n".join(rows))
+        out = self.jrun(p)
+        self.assertEqual(out["points"], 30)
+        r = run(p)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = run(p, "--duration", "9" * 400)
+        self.assertEqual(r.returncode, 2)
+        self.assertNotIn("Traceback", r.stderr)
+
+    def test_retention_range_checks(self):
+        rows = ["زمان ویدیو (٪);درصد بینندگان"] + \
+               ["%d;%s" % (x, ("%.3f" % (100 - x * 0.3)).replace(".", ",")) for x in range(101)]
+        out = self.jrun(self.write("c3.csv", "\n".join(rows)), "--duration", "600")
+        self.assertEqual(out["start"], 100.0)
+        self.assertAlmostEqual(out["end"], 70.0, places=2)
+        neg = self.write("neg.csv", "\n".join(["pos,ret"] + ["%d,%.2f" % (x * 10, 0.5 - x * 0.05) for x in range(30)]))
+        r = run(neg)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("منفی", r.stderr)
+        rel = self.write("rel.csv", "\n".join(["Video position (%),Relative audience retention"] +
+                                              ["%d,%.2f" % (x, 1.2 - x * 0.004) for x in range(101)]))
+        r = run(rel, "--json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("نسبی", r.stderr)
+        self.assertNotIn("در ۱۰۰ ضرب شد", r.stderr)
+
+    def test_leading_text_columns(self):
+        rows = ["Content,Video title,Video position (%),Absolute audience retention (%)"] + \
+               ["dQw4w9WgXcQ,My video,%d,%.1f" % (x * 5, 100 - x * 2) for x in range(20)]
+        out = self.jrun(self.write("lead.csv", "\n".join(rows)))
+        self.assertEqual(out["points"], 20)
+        self.assertEqual(out["axis"], "pct")
+        self.assertEqual(out["start"], 100.0)
+        self.assertEqual(out["end"], 62.0)
+
+    def test_zero_first_point_is_dropped(self):
+        rows = ["pos,ret", "0,0"] + ["%d,%.1f" % (x, 90 - x * 0.5) for x in range(1, 101)]
+        p = self.write("zero.csv", "\n".join(rows))
+        r = run(p, "--duration", "600", "--json")
+        out = json.loads(r.stdout)
+        self.assertEqual(out["start"], 89.5)
+        self.assertLess(out["hook_leak"], 5)
+        self.assertIn("کنار گذاشته شد", r.stderr)
+
+    def test_healthy_hook_and_flat_slide_wording(self):
+        rows = ["pos,ret"] + ["%d,%.1f" % (x * 6, 100 - (10 if x else 0)) for x in range(101)]
+        r = run(self.write("flat.csv", "\n".join(rows)))
+        self.assertIn("[سالم]", r.stdout)
+        self.assertNotIn("اول این را درست کن", r.stdout)
+        self.assertNotIn("وسط را کوتاه کن", r.stdout)
+        self.assertIn("سرازیری ناچیز است", r.stdout)
+
+    def test_hook_window_longer_than_video(self):
+        r = run(fx("long_fa.csv"), "--duration", "600", "--hook-window", "900")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("کوتاه‌تر از خود ویدیو", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
     def test_no_cross_skill_imports(self):
         with open(TOOL, encoding="utf-8") as fh:
             src = fh.read()

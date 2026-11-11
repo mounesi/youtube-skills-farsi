@@ -63,6 +63,13 @@ class TestFixLine(unittest.TestCase):
         self.assertEqual(self.fix("مصطفى"), "مصطفی")
         self.assertEqual(self.fix("٤٥٦ تا"), "۴۵۶ تا")
 
+    def test_presentation_forms(self):
+        # «ﻻ» و «ﻳ» (متن کپی‌شده از PDF) درست دیده می‌شوند ولی در جست‌وجو حرف دیگری‌اند
+        out, found = fs.fix_line("ﻻزم نيست، ﻳک بار")
+        self.assertEqual(out, "لازم نیست، یک بار")
+        self.assertIn(("arabic-letter", "ﻻزم", "لازم"), found)
+        self.assertFalse(any(f[0] == "fix-unsafe" for f in found))
+
     def test_mi_nemi(self):
         self.assertEqual(self.fix("این می شود"), "این می" + ZWNJ + "شود")
         self.assertEqual(self.fix("نمی دونم"), "نمی" + ZWNJ + "دونم")
@@ -299,7 +306,8 @@ class TestCLI(unittest.TestCase):
         with open(src, "rb") as fh:
             before = fh.read()
         p = run(src, "--fix")
-        self.assertEqual(p.returncode, 0, p.stderr)
+        # the overlap and empty cue in messy_fa.srt are errors --fix cannot fix: still exit 1
+        self.assertEqual(p.returncode, 1, p.stderr)
         out = os.path.join(self.tmp, "subs.fixed.srt")
         self.assertTrue(os.path.exists(out))
         with open(src, "rb") as fh:
@@ -355,7 +363,8 @@ class TestCLI(unittest.TestCase):
     def test_unsure_cli(self):
         p = run(fx("messy_fa.srt"), "--unsure")
         self.assertEqual(p.returncode, 0)
-        self.assertIn("شنیده → نوشته", p.stdout)
+        self.assertIn("شنیده ← نوشته", p.stdout)
+        self.assertNotIn("شنیده → نوشته", p.stdout)
         d = json.loads(run(fx("messy_fa.srt"), "--unsure", "--json").stdout)
         self.assertTrue(d["items"])
 
@@ -390,6 +399,231 @@ class TestCLI(unittest.TestCase):
         shutil.copytree(SKILL, dst)
         p = run(fx("clean_fa.srt"), tool=os.path.join(dst, "fasubs.py"))
         self.assertEqual(p.returncode, 0, p.stderr)
+
+
+class TestReviewFixes(unittest.TestCase):
+    """رگرسیون ایرادهای بازبینی (نوامبر ۲۰۲۶)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def fix(self, line, **kw):
+        return fs.fix_line(line, **kw)[0]
+
+    def found(self, line, **kw):
+        return fs.fix_line(line, **kw)[1]
+
+    def write(self, name, data):
+        path = os.path.join(self.tmp, name)
+        with open(path, "wb") as fh:
+            fh.write(data if isinstance(data, bytes) else data.encode("utf-8"))
+        return path
+
+    # ---- encodings
+    def test_cp1256_file(self):
+        raw = "1\r\n00:00:01,000 --> 00:00:03,000\r\nسلام دوستان كتاب ها رو ببين\r\n"
+        src = self.write("cp.srt", raw.encode("cp1256"))
+        p = run(src, "--json")
+        self.assertEqual(p.returncode, 1, p.stderr)
+        self.assertIn("cp1256", p.stderr)
+        self.assertIn("arabic-letter", [i["code"] for i in json.loads(p.stdout)["issues"]])
+        p = run(src, "--fix")
+        self.assertIn("UTF-8", p.stderr)
+        with open(os.path.join(self.tmp, "cp.fixed.srt"), "rb") as fh:
+            text = fh.read().decode("utf-8")  # strict: the output is UTF-8
+        self.assertNotIn("�", text)
+        self.assertIn("کتاب" + ZWNJ + "ها", text)
+        self.assertNotIn("ك", text)
+        self.assertIn("\r\n", text)
+
+    def test_utf16_file(self):
+        raw = "1\n00:00:01,000 --> 00:00:03,000\nسلام دوستان\n"
+        p = run(self.write("u16.srt", raw.encode("utf-16")), "--json")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(json.loads(p.stdout)["cues"], 1)
+
+    def test_undecodable_file(self):
+        # Latin-1 «café»: not UTF-8, and as cp1256 it has no Persian letters
+        p = run(self.write("bad.srt", b"1\n00:00:01,000 --> 00:00:03,000\ncaf\xe9\n"))
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("UTF-8", p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+
+    # ---- unsafe lines keep their findings; LRM inside a word
+    def test_lrm_inside_word(self):
+        line = "چی‎کار مي کني"
+        self.assertEqual(self.fix(line), "چی" + ZWNJ + "کار می" + ZWNJ + "کنی")
+        r = lint_text(srt(("00:00:01,000", "00:00:03,000", line)))
+        self.assertIn("arabic-letter", codes(r))
+
+    def test_unsafe_line_still_reported(self):
+        orig = fs.skeleton
+        try:
+            fs.skeleton = lambda t: t  # every change now looks unsafe
+            new, found = fs.fix_line("كتاب ها")
+            self.assertEqual(new, "كتاب ها")
+            c = [f[0] for f in found]
+            self.assertIn("arabic-letter", c)
+            self.assertIn("fix-unsafe", c)
+            r = lint_text(srt(("00:00:01,000", "00:00:03,000", "كتاب ها")))
+            self.assertIn("arabic-letter", codes(r))
+            self.assertIn("fix-unsafe", codes(r))
+            raw = srt(("00:00:01,000", "00:00:03,000", "كتاب ها"))
+            out, changes = fs.apply_fixes(raw, fs.parse_blocks(raw))
+            self.assertEqual(out, raw)
+            self.assertEqual([c[1] for c in changes], ["skipped"])
+        finally:
+            fs.skeleton = orig
+
+    # ---- «ترین» = train
+    def test_train_loanword(self):
+        for line in ("مدل رو ترین کردیم", "باید مدل ترین بشه", "دیتا رو ترین کن"):
+            self.assertEqual(self.fix(line), line, line)
+        self.assertEqual(self.fix("بزرگ ترین مدل"), "بزرگ" + ZWNJ + "ترین مدل")
+        self.assertEqual(self.fix("بزرگ ترین شهر"), "بزرگ" + ZWNJ + "ترین شهر")
+        self.assertEqual(self.fix("مدل ترین"), "مدل ترین")
+        self.assertEqual([f[0] for f in self.found("مدل ترین")], ["zwnj-maybe"])
+
+    # ---- month «می»
+    def test_month_may(self):
+        self.assertEqual(self.fix("در ماه می سال گذشته"), "در ماه می سال گذشته")
+        self.assertEqual(self.fix("۱۵ می امسال"), "۱۵ می امسال")
+        self.assertIn("zwnj-maybe", [f[0] for f in self.found("در ماه می سال گذشته")])
+        self.assertEqual(self.fix("ماه نمی شود"), "ماه نمی" + ZWNJ + "شود")
+        self.assertEqual(self.fix("من می روم"), "من می" + ZWNJ + "روم")
+
+    # ---- «ها» forms that are words
+    def test_ha_ambiguous(self):
+        for line in ("قدرت هاش ریت", "یه هات داگ", "دریاچه هامون خشک شد"):
+            self.assertEqual(self.fix(line), line, line)
+            self.assertEqual([f[0] for f in self.found(line)], ["zwnj-maybe"], line)
+        self.assertEqual(self.fix("کتاب هایش"), "کتاب" + ZWNJ + "هایش")
+        self.assertEqual(self.fix("کتاب هاشون"), "کتاب" + ZWNJ + "هاشون")
+
+    # ---- emphasis «ها» after a verb
+    def test_ha_after_imperative(self):
+        for line in ("مواظب باش ها اینجا", "بیا ها اینجا"):
+            self.assertEqual(self.fix(line), line, line)
+            self.assertIn("zwnj-maybe", [f[0] for f in self.found(line)])
+        self.assertEqual(self.fix("کتاب ها اینجا"), "کتاب" + ZWNJ + "ها اینجا")
+        self.assertEqual(self.fix("قلم ها رو"), "قلم" + ZWNJ + "ها رو")
+
+    # ---- vocative «ای» and spoken «ه»
+    def test_vocative_and_pronounced_he(self):
+        self.assertEqual(self.fix("خلاصه ای کاش زودتر"), "خلاصه ای کاش زودتر")
+        self.assertEqual(self.fix("گروه ای از ما"), "گروه ای از ما")
+        f = self.found("گروه ای از ما")
+        self.assertEqual(f, [("zwnj-maybe", "گروه ای", "گروهی")])
+        self.assertEqual(self.fix("یه نکته ای"), "یه نکته" + ZWNJ + "ای")
+
+    # ---- bare ezafe «ی»
+    def test_ezafe_ye(self):
+        self.assertEqual(self.fix("درباره ی این"), "درباره" + ZWNJ + "ی این")
+        self.assertEqual(self.fix("خونه ی قشنگ"), "خونه" + ZWNJ + "ی قشنگ")
+        for line in ("خونه یه", "خونه یک", "به ی"):
+            self.assertEqual(self.fix(line), line, line)
+        self.assertIn("zwnj", codes(lint_text(srt(("00:00:01,000", "00:00:03,000", "درباره ی این خونه ی قشنگ")))))
+
+    # ---- markup and entities
+    def test_entities_kept(self):
+        self.assertEqual(self.fix("&rlm;سلام دنیا"), "&rlm;سلام دنیا")
+        self.assertEqual(self.fix("سلام&nbsp;دنیا"), "سلام&nbsp;دنیا")
+        self.assertEqual(self.fix("&#8207;سلام دنیا"), "&#8207;سلام دنیا")
+        self.assertEqual(self.fix("&rlm;سلام, دنیا"), "&rlm;سلام، دنیا")
+
+    def test_digits_not_in_markup(self):
+        self.assertEqual(self.fix("<00:00:01.500><c>سلام 12</c>", digits="fa"), "<00:00:01.500><c>سلام ۱۲</c>")
+        self.assertEqual(self.fix('<font color="#00FF00">سلام 5</font>', digits="fa"),
+                         '<font color="#00FF00">سلام ۵</font>')
+        self.assertEqual(self.fix("{\\pos(100,200)}سلام 3", digits="fa"), "{\\pos(100,200)}سلام ۳")
+        self.assertEqual(self.fix('<font face="كوفي">كتاب</font>'), '<font face="كوفي">کتاب</font>')
+
+    # ---- broken timing lines
+    def test_broken_timing_not_dropped(self):
+        for bad in ("00:00:03,500 -> 00:00:05,000", "00:00:03,500 -->"):
+            raw = ("1\n00:00:01,000 --> 00:00:03,000\nیک\n\n2\n%s\nدو\n\n"
+                   "3\n00:00:05,000 --> 00:00:07,000\nسه\n" % bad)
+            blocks = fs.parse_blocks(raw)
+            self.assertEqual(len(blocks), 3, bad)
+            self.assertEqual(blocks[1]["lines"], ["دو"])
+            p = run(self.write("arrow.srt", raw), "--json")
+            self.assertEqual(p.returncode, 1, bad)
+            self.assertIn("bad-time", [i["code"] for i in json.loads(p.stdout)["issues"]])
+
+    def test_vtt_header_not_a_cue(self):
+        raw = "WEBVTT\n\nNOTE hi\n\n00:00:01.000 --> 00:00:02.000\nسلام\n"
+        self.assertEqual(len(fs.parse_blocks(raw)), 1)
+
+    # ---- Persian digits in timing
+    def test_timing_digits(self):
+        raw = "1\r\n۰۰:۰۰:۰۱,۰۰۰ --> ۰۰:۰۰:۰۳٫۰۰۰\r\nسلام دوستان\r\n"
+        self.assertIn("timing-digits", codes(lint_text(raw)))
+        out = os.path.join(self.tmp, "t.fixed.srt")
+        p = run(self.write("t.srt", raw), "--fix", "--out", out)
+        self.assertEqual(p.returncode, 0, p.stderr + p.stdout)
+        with open(out, "rb") as fh:
+            text = fh.read().decode("utf-8")
+        tline = text.split("\r\n")[1]
+        self.assertEqual(tline, "00:00:01,000 --> 00:00:03,000")
+        self.assertEqual(text.count("\r\n"), 3)
+        vtt = "WEBVTT\n\n۰۰:۰۰:۰۱٫۰۰۰ --> ۰۰:۰۰:۰۳٫۰۰۰ align:start\nسلام\n"
+        new, _ = fs.apply_fixes(vtt, fs.parse_blocks(vtt), kind="vtt")
+        self.assertIn("00:00:01.000 --> 00:00:03.000 align:start\n", new)
+
+    # ---- RLM already there
+    def test_rlm_not_flagged_twice(self):
+        src = self.write("r.srt", srt(("00:00:01,000", "00:00:03,000", "AI الان همه جا هست")))
+        out = os.path.join(self.tmp, "r2.srt")
+        run(src, "--fix", "--rlm", "--out", out)
+        p = run(out, "--json")
+        self.assertNotIn("rtl-start", [i["code"] for i in json.loads(p.stdout)["issues"]])
+        for line in ("<i>‏AI الان</i>", "&rlm;AI الان"):
+            self.assertEqual(self.fix(line, rlm=True), line)
+            self.assertNotIn("rtl-start", codes(lint_text(srt(("00:00:01,000", "00:00:03,000", line)))))
+
+    # ---- --fix exit code and overwrite guard
+    def test_fix_exit_code_and_overwrite(self):
+        raw = srt(("00:00:01,000", "00:00:04,000", "مي خوام"), ("00:00:03,000", "00:00:05,000", "دو"))
+        src = self.write("ov.srt", raw)
+        out = os.path.join(self.tmp, "ov.fixed.srt")
+        with open(out, "w", encoding="utf-8") as fh:
+            fh.write("دستی اصلاح شده")
+        p = run(src, "--fix")
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("--force", p.stderr)
+        with open(out, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "دستی اصلاح شده")
+        p = run(src, "--fix", "--force", "--json")
+        self.assertEqual(p.returncode, 1, p.stderr)  # the overlap is still an error
+        d = json.loads(p.stdout)
+        self.assertEqual(d["errors"], 1)
+        p = run(src, "--fix")  # identical output: fine without --force
+        self.assertEqual(p.returncode, 1, p.stderr)
+        self.assertIn("خطا و", p.stdout)
+        self.assertEqual(run(src, "--force").returncode, 2)  # --force only with --fix
+
+    def test_fix_header_names_output(self):
+        src = self.write("m.srt", srt(("00:00:01,000", "00:00:03,000", "مي خوام")))
+        p = run(src, "--fix")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        first = p.stdout.splitlines()[0]
+        self.assertIn("اصلاح‌شده: m.fixed.srt", first)
+        self.assertNotIn("←", first)
+
+    # ---- Whisper JSON: no per-line length
+    def test_json_capacity(self):
+        seg74 = "این یک جمله‌ی معمولی است که ویسپر در یک تکه برگردانده و طولش زیاد است"
+        seg100 = seg74 + " و این هم بقیه‌ی همان جمله که دیگر جا نمی‌شود"
+        self.assertGreater(fs.visible_len(seg74), 42)
+        self.assertGreater(fs.visible_len(seg100), 84)
+        d = {"segments": [{"start": 0, "end": 6, "text": seg74}, {"start": 7, "end": 14, "text": seg100}]}
+        p = run(self.write("w.json", json.dumps(d, ensure_ascii=False)), "--json")
+        issues = json.loads(p.stdout)["issues"]
+        self.assertNotIn("line-long", [i["code"] for i in issues])
+        self.assertEqual([i["cue"] for i in issues if i["code"] == "capacity"], [2])
 
 
 class TestSkillDoc(unittest.TestCase):

@@ -311,5 +311,130 @@ class YtEditTest(unittest.TestCase):
             self.dm.parse_ts("nope")
 
 
+    # ---------------------------------------------------------- review fixes (regressions)
+
+    def test_learning_breath_survives_fillers_touching_kept_words(self):
+        # «اِ» touches both kept neighbours; the real silence lies between the two fillers
+        p = self.write("zero.json", words_json([[("سلام", 0.0, 0.5), ("دوستان.", 0.5, 1.0), ("اِ", 1.0, 1.4),
+                                                   ("اِ", 2.4, 2.8), ("امروز", 2.8, 3.3), ("شروع", 3.35, 3.8),
+                                                   ("کنیم.", 3.85, 4.2)]]))
+        rep = self.report(p, "--mode", "learning")
+        keep = rep["keep"]
+        kept_between = sum(max(0.0, min(b, 2.8) - max(a, 1.0)) for a, b in keep)
+        self.assertAlmostEqual(kept_between, 0.2, places=2)
+        for a, b in ((1.0, 1.4), (2.4, 2.8)):  # both «اِ» fully cut
+            self.assertTrue(any(x <= a + 1e-6 and b <= y + 1e-6 for x, y in rep["merged"]), (a, b))
+        # a filler, then a removed repeat, both away from the kept word: the 0.2 s stays too
+        p2 = self.write("t1.json", words_json([[("کنید.", 7.5, 8.0), ("خب،", 9.0, 9.3), ("the", 9.6, 9.8),
+                                                  ("the", 9.8, 10.0), ("end.", 10.05, 10.4)]]))
+        rep2 = self.report(p2, "--mode", "learning")
+        kept2 = sum(max(0.0, min(b, 9.8) - max(a, 8.0)) for a, b in rep2["keep"])
+        self.assertAlmostEqual(kept2, 0.2, places=2)
+
+    def test_learning_restart_is_one_cut(self):
+        rep = self.report(TAKE, "--mode", "learning")
+        self.assertEqual(len(self.kinds(rep, "REPEAT")), 1)
+
+    def test_parallel_sentences_are_not_a_restart(self):
+        p = self.write("a.srt", "1\n00:00:01,000 --> 00:00:04,000\nاگر روی این دکمه کلیک کنید منوی تنظیمات باز می‌شود.\n\n"
+                                "2\n00:00:04,200 --> 00:00:07,000\nاگر روی این دکمه کلیک کنید پنجره‌ی ذخیره را می‌بینید.\n")
+        for mode in ("suggest", "learning"):
+            self.assertEqual(self.kinds(self.report(p, "--mode", mode), "REPEAT"), [], mode)
+
+    def test_more_persian_reduplications_are_meaning(self):
+        text = "فایل‌ها رو یکی یکی باز کنید و تک تک خط‌ها رو رفته رفته آهسته آهسته بخونید که که بعد"
+        p = self.write("redup.json", words_json([[(w, i * 0.4, i * 0.4 + 0.35)
+                                                    for i, w in enumerate(text.split())]]))
+        rpt = self.kinds(self.report(p, "--mode", "learning"), "REPEAT")
+        self.assertEqual([c["why"] for c in rpt], ["تکرار «که»"])  # only the real stutter
+
+    def test_answer_yes_is_not_a_filler(self):
+        p = self.write("b.srt", "1\n00:00:00,000 --> 00:00:03,000\nآیا این ابزار رایگان است؟\n\n"
+                                "2\n00:00:03,300 --> 00:00:03,800\nبله.\n\n"
+                                "3\n00:00:04,000 --> 00:00:04,800\nخب، یعنی…\n\n"
+                                "4\n00:00:05,000 --> 00:00:07,000\nو همین الان امتحانش کنید.\n")
+        for mode in ("suggest", "learning"):
+            fill = self.kinds(self.report(p, "--mode", mode), "FILLER")
+            self.assertEqual([(c["start"], c["end"]) for c in fill], [(4.0, 4.8)], mode)
+
+    def test_zwnj_or_space_restart(self):
+        p = self.write("zw.srt", "1\n00:00:00,000 --> 00:00:02,000\nسلام به همه\n\n"
+                                 "2\n00:00:02,200 --> 00:00:04,000\nامروز می‌خوام درباره‌ی پرامپت\n\n"
+                                 "3\n00:00:04,300 --> 00:00:07,000\nامروز می خوام درباره‌ی پرامپت حرف بزنم\n")
+        self.assertEqual([(c["start"], c["end"]) for c in self.kinds(self.report(p), "REPEAT")], [(2.2, 4.0)])
+        j = self.write("zw.json", words_json([[("تو", 0.0, 0.2), ("کلاد", 0.25, 0.5), ("می", 0.55, 0.7),
+                                                 ("تونی", 0.75, 1.0), ("تو", 1.3, 1.5), ("کلاد", 1.55, 1.8),
+                                                 ("می‌تونی", 1.85, 2.2), ("پروژه", 2.25, 2.6),
+                                                 ("بسازی.", 2.65, 3.0)]]))
+        rpt = self.kinds(self.report(j, "--mode", "learning"), "REPEAT")
+        self.assertEqual([(c["start"], c["end"]) for c in rpt], [(0.0, 1.0)])
+
+    def test_cue_level_cut_off_last_word(self):
+        p = self.write("cut.srt", "1\n00:00:00,000 --> 00:00:02,000\nامروز می‌خوام درباره‌ی پرامپت\n\n"
+                                  "2\n00:00:02,300 --> 00:00:05,000\nامروز می‌خوام درباره‌ی پرامپت‌نویسی حرف بزنم\n")
+        self.assertEqual([(c["start"], c["end"]) for c in self.kinds(self.report(p), "REPEAT")], [(0.0, 2.0)])
+
+    def test_no_zero_frame_cuts(self):
+        p = self.write("sub.srt", "1\n00:00:00,000 --> 00:00:02,000\nسلام دوستان\n\n"
+                                  "2\n00:00:02,460 --> 00:00:04,000\nامروز شروع می‌کنیم\n")
+        out = os.path.join(self.tmp, "m.edl")
+        rep = self.report(p, "--edl", out)
+        self.assertEqual(rep["cuts"], [])
+        self.assertEqual(rep["removed"], 0)
+        with open(out, encoding="utf-8") as f:
+            self.assertNotIn("|D:", f.read())
+
+    def test_unwritable_output_paths(self):
+        r = self.run_tool(SRT, "--edl", os.path.join(self.tmp, "no", "such", "x.edl"))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("فایل نوشته نشد", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        folder = os.path.join(self.tmp, "dir.srt")
+        os.mkdir(folder)
+        ok = os.path.join(self.tmp, "ok.edl")
+        r = self.run_tool(SRT, "--edl", ok, "--markers", folder)
+        self.assertEqual(r.returncode, 1)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertFalse(os.path.exists(ok))           # nothing half-written
+        self.assertEqual(sorted(os.listdir(self.tmp)), ["dir.srt"])
+
+    def test_fps_below_one_rejected(self):
+        r = self.run_tool(SRT, "--fps", "0.4")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("نرخ فریم", r.stderr)
+
+    def test_help_is_persian(self):
+        for args in (["--help"], ["--bogus"]):
+            r = self.run_tool(*args)
+            text = r.stdout + r.stderr
+            self.assertIn("استفاده:", text)
+            for en in ("usage:", "positional arguments", "optional arguments", "options:", "show this help"):
+                self.assertNotIn(en, text, (args, en))
+
+    def test_addresses_user_as_to(self):
+        for mode in ("suggest", "learning"):
+            out = self.run_tool(SRT, "--mode", mode).stdout
+            for shoma in ("بپذیرید", "بزنید و", "خودتان", "گوش کنید", "بدهید"):
+                self.assertNotIn(shoma, out)
+
+    def test_long_take_is_fast(self):
+        import time
+        words = "امروز درباره‌ی کلاد حرف می‌زنیم اِ خب این دکمه رو بزنید پروژه".split()
+        segs, t = [], 0.0
+        for s in range(400):
+            ws = []
+            for k in range(10):
+                ws.append((words[(s * 7 + k * 3) % len(words)], round(t, 3), round(t + 0.25, 3)))
+                t += 0.25 + (0.6 if k % 3 == 0 else 0.05)
+            segs.append(ws)
+            t += 0.8
+        p = self.write("big.json", words_json(segs))
+        t0 = time.time()
+        rep = self.dm.analyse(p, "learning")
+        clock = self.dm.Clock(30.0, "01:00:00:00", "00:00:00:00")
+        self.dm.learning_markers(rep, clock, False)
+        self.dm.suggest_markers(self.dm.analyse(p, "suggest"), clock, False)
+        self.assertLess(time.time() - t0, 1.0)
+
 if __name__ == "__main__":
     unittest.main()

@@ -16,6 +16,9 @@
     python3 -I keyword.py "آرتیفکت" --test "ارتیفکیت لطفا" --test "مرسی"
     python3 -I keyword.py "دهه ۶۰" --json
 
+regex در پایتون و جاوااسکریپت (ES2018 به بعد) و PCRE یکسان کار می‌کند و فقط فلگ i می‌خواهد.
+--test کامنت را بدون هیچ یکدست‌سازی، درست مثل اتوماسیون، با همان regex چاپ‌شده امتحان می‌کند.
+
 امتیازها حدس‌اند (قاعده‌ی سرانگشتی از غلط‌های رایج تایپی و شنیداری فارسی)، نه شمارش واقعی کامنت‌ها.
 فقط کتابخانه‌ی استاندارد پایتون ۳.۹.
 """
@@ -31,6 +34,7 @@ import _fatext as fa  # noqa: E402
 
 ZWNJ = fa.ZWNJ
 VOWELS = set("اآوی")
+AA = "\uE000"  # stands in for آ inside finglish (fold() turns آ into ا, but آوا is ava, not ova)
 ALEFS = "آا"
 FA_LETTERS = set("ابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهیآئء")
 
@@ -63,6 +67,10 @@ FINGLISH = {
     "ف": ["f"], "ق": ["gh", "q"], "ک": ["k", "c"], "گ": ["g"], "ل": ["l"], "م": ["m"],
     "ن": ["n"], "ئ": ["e"], "ء": [""],
 }
+# two consonants an English word can start with (prompt, claude, skill...): only these keep the
+# bare cluster as the top finglish guess; every other cluster takes a short vowel (شروع = shoro)
+ONSETS = {"pr", "pl", "br", "bl", "tr", "dr", "kr", "kl", "gr", "gl", "fr", "fl", "sk", "sp",
+          "st", "sm", "sn", "sl", "sw"}
 
 LABEL = {
     "orig": "شکل اصلی",
@@ -78,12 +86,15 @@ LABEL = {
     "drop_vowel": "حذف حرف صدادار",
     "add_vowel": "اضافه شدن حرف صدادار",
     "double_vowel": "کشیدن حرف صدادار",
+    "swap_vowel": "جابه‌جایی ا و و",
+    "drop_cons": "جاافتادن حرف بی‌صدا",
     "homophone": "حرف هم‌صدا",
     "heard": "اشتباه شنیداری",
     "repeat_last": "تکرار حرف آخر",
     "ascii_digits": "رقم انگلیسی",
     "fa_digits": "رقم فارسی",
     "ar_digits": "رقم عربی",
+    "num_words": "عدد با حروف",
     "quotes": "داخل گیومه",
     "also": "شکلی که خودت دادی",
     "loanword": "املای انگلیسی",
@@ -93,13 +104,15 @@ LABEL = {
     "latin_vowel": "جابه‌جایی حرف صدادار لاتین",
     "latin_double": "حرف دوتایی لاتین",
     "latin_space": "فاصله/خط تیره‌ی لاتین",
+    "latin_drop": "جاافتادن حرف لاتین",
+    "latin_plural": "جمع انگلیسی (s)",
 }
 
 
 # nobody inserts a vowel letter next to these (دهه never becomes دیهه)
 GUTTURAL = set("هحعءئ")
 # edits that end a chain (a second edit on top of them only adds noise)
-TERMINAL = {"repeat_last", "double_vowel", "quotes", "ar_digits"}
+TERMINAL = {"repeat_last", "double_vowel", "quotes", "ar_digits", "latin_plural", "drop_cons"}
 
 
 def _is_cons(ch):
@@ -129,6 +142,12 @@ def _ops_fa(s):
         if ch in "اوی" and 0 < i < n - 1 and s[i - 1] not in " " + ZWNJ:
             yield s[:i] + s[i + 1:], {"ی": 0.3, "ا": 0.25, "و": 0.2}[ch], "drop_vowel"
             yield s[:i] + ch + s[i:], 0.08, "double_vowel"
+        # ا <-> و between two consonants: پرامپت is very often written پرومپت
+        if ch in "او" and 0 < i < n - 1 and _is_cons(s[i - 1]) and _is_cons(s[i + 1]):
+            yield s[:i] + {"ا": "و", "و": "ا"}[ch] + s[i + 1:], 0.4, "swap_vowel"
+        # a consonant lost inside a cluster just before the last letter (پرامپت -> پرامت)
+        if i == n - 2 and n >= 4 and _is_cons(ch) and _is_cons(s[i - 1]) and _is_cons(s[i + 1]):
+            yield s[:i] + s[i + 1:], 0.1, "drop_cons"
         if _is_cons(ch) and i + 1 < n and _is_cons(s[i + 1]) and not {ch, s[i + 1]} & GUTTURAL:
             for v, w in (("ی", 0.3), ("ا", 0.2), ("و", 0.12)):
                 yield s[:i + 1] + v + s[i + 1:], w, "add_vowel"
@@ -164,19 +183,28 @@ def _digit_ops(s):
 
 # ------------------------------------------------------------ Latin edits
 
-def _ops_latin(s):
+def _ops_latin(s, letters=True, loan=False):
+    """letters=False (acronyms such as MCP, AI): only space/hyphen and digit edits.
+    loan=True (the English spelling itself): also the common prompt -> promt and plural -s."""
     n = len(s)
     for i, ch in enumerate(s):
-        if ch in "ck":
-            yield s[:i] + ("k" if ch == "c" else "c") + s[i + 1:], 0.35, "latin_ck"
-        if ch in "aeiou" and 0 < i:
-            for alt in {"a": "e", "e": "a", "i": "e", "o": "u", "u": "o"}[ch]:
-                yield s[:i] + alt + s[i + 1:], 0.2, "latin_vowel"
-        if i + 1 < n and s[i + 1] == ch and ch.isalpha():
-            yield s[:i] + s[i + 1:], 0.35, "latin_double"
+        if letters:
+            # c inside "ch" is a different sound: chatgpt never becomes khatgpt
+            if ch in "ck" and not (ch == "c" and i + 1 < n and s[i + 1] == "h"):
+                yield s[:i] + ("k" if ch == "c" else "c") + s[i + 1:], 0.35, "latin_ck"
+            if ch in "aeiou" and 0 < i:
+                for alt in {"a": "e", "e": "a", "i": "e", "o": "u", "u": "o"}[ch]:
+                    yield s[:i] + alt + s[i + 1:], 0.2, "latin_vowel"
+            if i + 1 < n and s[i + 1] == ch and ch.isalpha():
+                yield s[:i] + s[i + 1:], 0.35, "latin_double"
         if ch in " -":
             yield s[:i] + s[i + 1:], 0.6, "latin_space"
             yield s[:i] + ("-" if ch == " " else " ") + s[i + 1:], 0.3, "latin_space"
+    if loan and letters:
+        if s.endswith("mpt"):
+            yield s[:-2] + "t", 0.35, "latin_drop"
+        if s[-1:].isalpha() and not s.endswith("s"):
+            yield s + "s", 0.3, "latin_plural"
     if re.search("[۰-۹٠-٩]", s):
         yield fa.to_ascii_digits(s), 0.6, "ascii_digits"
 
@@ -185,7 +213,9 @@ def _ops_latin(s):
 
 def _finglish(s):
     """Return [(latin, weight)] for a Persian word; short vowels are unknown so a few guesses."""
-    t = fa.fold(s.replace(ZWNJ, " ")).replace("أ", "ا")
+    t = fa.fold(s.replace(ZWNJ, " ").replace("آ", AA)).replace("أ", "ا")
+    # letters and digits are separate words (دهه60 -> دهه 60), so a final silent ه stays final
+    t = re.sub(r"(?<=[^\W\d_])(?=\d)|(?<=\d)(?=[^\W\d_])", " ", t)
     words = t.split()
     out = {}
     for joiner, jw in (("", 1.0), (" ", 0.7)):
@@ -208,9 +238,16 @@ def _finglish_word(w):
     # tokens: (latin options, is_vowel)
     toks = []
     n = len(w)
-    for i, ch in enumerate(w):
-        prev_vowel = i == 0 or w[i - 1] in VOWELS
-        if ch == "ا":
+    i = 0
+    while i < n:
+        ch = w[i]
+        prev_vowel = i == 0 or w[i - 1] in VOWELS or w[i - 1] == AA
+        if i == 0 and ch == "ا" and n > 1 and w[1] in "یو":
+            # a word-initial ای / او is one vowel: ایران = iran, اوپن = open (not ayran / avpn)
+            toks.append((["i", "ey"] if w[1] == "ی" else ["o", "u", "oo"], True))
+            i += 2
+            continue
+        if ch == "ا" or ch == AA:
             toks.append((["a"], True))
         elif ch == "و":
             toks.append((["v"], False) if prev_vowel else (["o", "u", "oo"], True))
@@ -230,9 +267,11 @@ def _finglish_word(w):
             toks.append((FINGLISH[ch], False))
         else:
             return []
+        i += 1
     # Short vowels are not written in Persian. A word cannot start with two consonants and a
     # syllable cannot hold three, so guess a short vowel after the first consonant of such a run
-    # (کلاد -> kelad, آرتیفکت -> artifakt); the bare skeleton stays as a weaker option.
+    # (کلاد -> kelad, آرتیفکت -> artifakt). The bare cluster stays the top guess only at the start
+    # of a word and only for a real English onset (prompt, claude); anywhere else it is weak.
     seq, k = [], 0
     while k < len(toks):
         if toks[k][1] is not False:
@@ -246,9 +285,8 @@ def _finglish_word(w):
         at_start = k == 0
         if len(run) >= 3 or (at_start and len(run) >= 2):
             seq.append(run[0])
-            # loanwords keep the bare cluster (prompt), Persian words take the vowel (kelas)
             v1, v2 = ("e", "a") if at_start else ("a", "e")
-            bare = 1.0
+            bare = 1.0 if at_start and run[0][0][0] + run[1][0][0] in ONSETS else 0.3
             if run[1][0][0] in ("h", ""):  # no loanword starts dh-/th-: دهه = dahe
                 v1, v2, bare = "a", "e", 0.3
             seq.append(([("", bare), (v1, 0.95), (v2, 0.45)], True))
@@ -267,19 +305,74 @@ def _finglish_word(w):
     return combos
 
 
+# ------------------------------------------------------------ numbers in words
+
+def _num_words(n):
+    """0..999 -> Persian words (60 -> شصت, 65 -> شصت و پنج); None when out of range."""
+    if not 0 <= n <= 999:
+        return None
+    names = {}
+    for word, val in fa._FA_WORD_NUM.items():
+        names.setdefault(val, word)  # first spelling in the table is the standard one
+    if n in names:
+        return names[n]
+    parts = []
+    hundreds, rest = n - n % 100, n % 100
+    if hundreds:
+        parts.append(names[hundreds])
+    if rest in names:
+        parts.append(names[rest])
+    elif rest:
+        parts += [names[rest - rest % 10], names[rest % 10]]
+    return " و ".join(parts)
+
+
+def _spelled_numbers(s):
+    """دهه ۶۰ -> [(«دهه شصت», 0.3), («دهه شست», 0.15)]: the number written out in words."""
+    t = fa.to_ascii_digits(s)
+    if not re.search(r"\d", t):
+        return []
+    bad = []
+
+    def rep(m):
+        words = _num_words(int(m.group(0)))
+        if words is None:
+            bad.append(m.group(0))
+            return m.group(0)
+        return " " + words + " "
+
+    t = re.sub(r"\d+", rep, t)
+    if bad:
+        return []
+    t = re.sub(" +", " ", t).strip()
+    out = [(t, 0.3)]
+    if "شصت" in t:
+        out.append((t.replace("شصت", "شست"), 0.15))  # the most common misspelling of شصت
+    return out
+
+
 # ------------------------------------------------------------ generator
 
-def _canon(kw):
+def _display(kw):
     s = fa.normalize(kw, diacritics=True).strip("«»\"'“”‹›")
-    s = fa.normalize(s)
+    return fa.normalize(s)
+
+
+def _canon(kw):
+    s = _display(kw)
     return s.lower() if not _is_fa(s) else s
 
 
 def generate(keyword, also=(), depth=2):
-    """[(variant, score, [labels])] sorted by score; the first item is the keyword itself."""
-    base = _canon(keyword)
+    """[(variant, score, [labels])] sorted by score; the first item is the keyword itself,
+    spelled the way the user typed it."""
+    display = _display(keyword)
+    base = display.lower() if not _is_fa(display) else display
     if not base:
         return []
+    latin_kw = not _is_fa(base)
+    # acronyms (MCP, AI, n8n): no letter edits, only spacing and digits
+    acronym = latin_kw and (display.isupper() or len(base.replace(" ", "")) <= 3)
     found = {}
 
     def add(v, w, why):
@@ -291,19 +384,27 @@ def generate(keyword, also=(), depth=2):
             return True
         return False
 
-    seeds = [(base, 1.0, ["orig"])]
+    seeds = []
+    if display != base:
+        # show the user's own casing (ChatGPT) as the keyword; edits run on the lowercase form
+        add(display, 1.0, ["orig"])
+        seeds.append((base, 0.95, ["latin_case"]))
+    else:
+        seeds.append((base, 1.0, ["orig"]))
     for a in also:
         a = _canon(a)
         if a and a != base:
             seeds.append((a, 0.85, ["also"]))
     if _is_fa(base):
         key = fa.fold(base).replace(" ", "")
-        if key in LOANWORDS:
+        loan = key in LOANWORDS
+        if loan:
             seeds.append((LOANWORDS[key], 0.6, ["loanword"]))
+        # for a known loanword the real English spelling is already there: finglish guesses
+        # (pramapt) must not outrank the real Persian misspellings
+        fw = 0.15 if loan else 0.35
         for lat, w in _finglish(base):
-            seeds.append((lat, 0.35 * w, ["finglish"]))
-    if not _is_fa(base) and keyword.strip() != base and keyword.strip():
-        add(keyword.strip(), 0.4, ["latin_case"])
+            seeds.append((lat, fw * w, ["finglish"]))
 
     frontier = []
     for v, w, why in seeds:
@@ -315,55 +416,134 @@ def generate(keyword, also=(), depth=2):
             if why[-1] in TERMINAL or (level and why[0] == "finglish"):
                 continue  # finglish is already a guess: one edit on top of it is enough
             latin = not _is_fa(v)
-            ops = _ops_latin(v) if latin else _ops_fa(v)
+            if latin:
+                letters = not (acronym or (why[0] == "loanword" and len(v.replace(" ", "")) <= 3))
+                loan_seed = level == 0 and why == ["loanword"]
+                ops = _ops_latin(v, letters=letters, loan=loan_seed)
+            else:
+                ops = _ops_fa(v)
             for nv, ow, lab in ops:
                 if nv == v:
                     continue
                 score = w * ow
                 if score < (0.03 if latin else 0.01):
                     continue
-                if add(nv, score, why + [lab] if why != ["orig"] else [lab]):
+                label = [lab] if why in (["orig"], ["latin_case"]) else why + [lab]
+                if add(nv, score, label):
                     nxt.append((nv, score, found[nv][1]))
         nxt.sort(key=lambda x: -x[1])
         frontier = nxt[:250]
-    add("«" + base + "»", 0.3, ["quotes"])
-    add('"' + base + '"', 0.2, ["quotes"])
+    if _is_fa(base):
+        for txt, w in _spelled_numbers(base):
+            add(txt, w, ["num_words"])
+    add("«" + display + "»", 0.3, ["quotes"])
+    add('"' + display + '"', 0.2, ["quotes"])
     items = [(v, round(w, 4), why) for v, (w, why) in found.items()]
     items.sort(key=lambda x: (-x[1], abs(len(x[0]) - len(base)), x[0]))
     return items
 
 
 # ------------------------------------------------------------ regex
+# The pattern is written so that Python re, JavaScript (with or without the u flag, ES2018+ for
+# the lookbehind) and PCRE read it the same way: no \w / \W (ASCII-only in JavaScript), invisible
+# characters as \u escapes, and every repeat that could overlap a neighbour is bounded.
+
+# a "word character" for the boundaries: Latin letters, digits, Arabic-script letters, marks and
+# digits (not ، ؛ ؟ ٪ ۔, not ZWNJ: «کلاد‌ها» still counts as the keyword)
+_WORD = (r"[0-9A-Za-z_\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u024F\u0610-\u061A\u0620-\u0669"
+         r"\u066E-\u06D3\u06D5-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFE]")
+_NOT_WORD = "[^" + _WORD[1:]
+V = "[اآویيى]"
+# what can sit inside a Persian word without changing it: tatweel, harakat, hamza above,
+# superscript alef, ZWNJ, LRM, RLM, BOM
+GAP = r"[\u0640\u064B-\u0652\u0654\u0670\u200C\u200E\u200F\uFEFF]*"
+WGAP = r"[ \u200C]*"
+# between two words, after a Persian letter: optional ezafe (دهه‌ی ۶۰، دهه ی ۶۰، دههٔ ۶۰)
+EZAFE_GAP = r"(?:[ \u200C]*(?:[یيى]|\u0654))?[ \u200C]*"
+REP = "{1,8}"  # a stretched last letter (آرتیفکتتت), bounded so long comments stay fast
+# spoken-Persian endings glued to the keyword: ارتیفکتو، پرامپتشو، ارتیفکتها، کلادی
+FA_SUFFIX = ("(?:\\u200C?(?:هاشو|هارو|های|هات|هاش|ها|اشو|ارو|اش|ای|شو|مو|تو|رو|یه|و|ی|ه|ش|م|ت|ا))?")
+LAT_SUFFIX = "(?:'s|’s|es|s)?"
+_SPECIAL = set("\\^$.|?*+()[]{}/")
+
+
+def _esc(ch):
+    return "\\" + ch if ch in _SPECIAL else ch
+
 
 def _char_class(chars):
     chars = "".join(sorted(set(chars), key=chars.index))
     if len(chars) == 1:
-        return re.escape(chars)
+        return _esc(chars)
     return "[" + "".join("\\" + c if c in "\\]^-[" else c for c in chars) + "]"
 
 
+def _vslot(lo, hi):
+    return "(?:" + GAP + V + "){%d,%d}" % (lo, hi)
+
+
 def _fa_pattern(s):
-    out = []
+    """A pattern for one Persian keyword that tolerates the usual misspellings. A vowel letter in
+    the middle may be swapped or doubled; it may be dropped (and one may be added between two
+    consonants) only when the word has at least three consonants, so a short keyword (سورا)
+    does not shrink to a skeleton that matches سر, سری, سیر."""
     n = len(s)
-    for i, ch in enumerate(s):
-        last = i == n - 1
+    loose = sum(1 for c in s if _is_cons(c)) >= 3
+    out = []
+    prev_fa = False  # the previous token is a Persian letter: a GAP goes before the next one
+    i = 0
+    while i < n:
+        ch = s[i]
         if ch in " " + ZWNJ:
-            out.append("[ " + ZWNJ + "]?")
+            j = i
+            while j < n and s[j] in " " + ZWNJ:
+                j += 1
+            out.append(EZAFE_GAP if i and s[i - 1] in FA_LETTERS else WGAP)
+            prev_fa = False
+            i = j
             continue
-        if ch in ALEFS:
-            out.append("[آا]+" if i == 0 else "[اآویيى]*")
-            continue
-        if ch in "یو":
-            own = "[یيى]" if ch == "ی" else "و"
-            if i == 0 or last:
-                out.append(own + "+")
+        gap = GAP if prev_fa else ""
+        word_start = i == 0 or s[i - 1] in " " + ZWNJ
+        if ch in VOWELS and word_start:
+            if ch in ALEFS:
+                cls = "[آا]"
             else:
-                out.append("[اآویيى]*")  # dropped, doubled or swapped vowel letter
+                cls = "[یيى]" if ch == "ی" else "و"
+            nxt_vowel = i + 1 < n and s[i + 1] in VOWELS
+            out.append(gap + cls + ("" if nxt_vowel else REP))
+            prev_fa = True
+            i += 1
+            continue
+        if ch in VOWELS:
+            j = i
+            while j < n and s[j] in VOWELS:
+                j += 1
+            run = s[i:j]
+            word_end = j == n or s[j] in " " + ZWNJ
+            if word_end:
+                mid, fin = run[:-1], run[-1]
+                if mid:
+                    out.append(_vslot(max(1, len(mid) - 1), len(mid) + 5))
+                fin_cls = "[اآ]" if fin in ALEFS else ("[یيى]" if fin == "ی" else "و")
+                out.append(GAP + fin_cls + REP)
+            else:
+                lo = max(0 if loose else 1, len(run) - 1)
+                out.append(_vslot(lo, len(run) + 5))
+            prev_fa = True
+            i = j
             continue
         if ch.isdigit():
             d = fa.to_ascii_digits(ch)
             out.append(_char_class(d + fa.to_fa_digits(d) + "٠١٢٣٤٥٦٧٨٩"[int(d)]))
+            prev_fa = False
+            i += 1
             continue
+        if ch not in FA_LETTERS:
+            out.append(_esc(ch))
+            prev_fa = False
+            i += 1
+            continue
+        last = i == n - 1
         alts = ch
         for grp, _gw in HOMOPHONES:
             if ch in grp and not (ch == "ه" and (last or s[i + 1] in " " + ZWNJ)):
@@ -376,40 +556,93 @@ def _fa_pattern(s):
             alts += ARABIC_KB[ch]
             if ARABIC_KB[ch] == "ک":
                 alts += "ك"
-        cls = _char_class(alts)
-        out.append(cls + ("+" if last else ""))
-        if not last and _is_cons(s[i + 1]):
-            out.append("[اآویيى]*")
+        out.append(gap + _char_class(alts) + (REP if last else ""))
+        prev_fa = True
+        if (not last and loose and _is_cons(s[i + 1])
+                and not {ch, s[i + 1]} & GUTTURAL):
+            out.append(_vslot(0, 2))  # a vowel letter added between two consonants
+        i += 1
     return "".join(out)
 
 
+def _fa_literal(v):
+    """A Persian variant as a literal, with the same invisible-character and spacing tolerance."""
+    out, prev_fa, i, n = [], False, 0, len(v)
+    while i < n:
+        ch = v[i]
+        if ch in " " + ZWNJ:
+            j = i
+            while j < n and v[j] in " " + ZWNJ:
+                j += 1
+            out.append(EZAFE_GAP if i and v[i - 1] in FA_LETTERS else WGAP)
+            prev_fa, i = False, j
+            continue
+        if ch == "-":
+            out.append("[ -]*")
+            prev_fa = False
+        else:
+            is_fa = "\u0600" <= ch <= "\u06FF"
+            out.append((GAP if prev_fa and is_fa else "") + _esc(ch))
+            prev_fa = is_fa
+        i += 1
+    return "".join(out)
+
+
+def _latin_literal(v):
+    return re.sub(r"(?:\\?[ \-])+", "[ -]*", "".join(_esc(c) for c in v))
+
+
+def _fa_letter_count(s):
+    return sum(1 for c in s if c in FA_LETTERS)
+
+
 def build_regex(items, exact=False):
-    """One pattern (use it case-insensitive) that matches every variant in items."""
+    """One pattern (use it case-insensitive, flag i) that matches every variant in items."""
     variants = [v for v, _s, _w in items]
     if not variants:
         return ""
     fa_bases = [v for v, _s, why in items if why in (["orig"], ["also"]) and _is_fa(v)]
     parts = [_fa_pattern(b) for b in fa_bases]
-    core = "(?:" + "|".join(parts) + ")" if parts else ""
-    rx = re.compile(core, re.I) if core else None
-    extra = []
+    rx = re.compile("(?:" + "|".join(parts) + ")", re.I) if parts else None
+    fa_extra, lat_extra, fa_words, seen = [], [], list(fa_bases), set()
     for v in variants:
-        bare = v.strip("«»\"")
+        bare = v.strip("«»\"").strip()
+        if not bare or bare.lower() in seen:
+            continue
+        seen.add(bare.lower())  # flag i covers the other case: AI and ai are one entry
         if rx is not None and rx.fullmatch(bare):
             continue
-        piece = re.escape(bare).replace("\\ ", "[ -]?").replace("\\-", "[ -]?")
-        if piece not in extra:
-            extra.append(piece)
-    alts = parts + extra
-    body = "(?:" + "|".join(alts) + ")"
+        if _is_fa(bare):
+            piece, dest = _fa_literal(bare), fa_extra
+        else:
+            piece, dest = _latin_literal(bare), lat_extra
+        if re.fullmatch(piece, ""):
+            continue  # a piece that matches nothing-at-all would match every comment
+        if piece not in dest:
+            dest.append(piece)
+            if dest is fa_extra:
+                fa_words.append(bare)
+    groups = []
+    fa_alts = parts + fa_extra
+    if fa_alts:
+        g = "(?:" + "|".join(fa_alts) + ")"
+        # glued endings only for keywords of 3+ letters: on a 2-letter word they match too much
+        if min(_fa_letter_count(w) for w in fa_words) >= 3:
+            g += FA_SUFFIX
+        groups.append(g)
+    if lat_extra:
+        groups.append("(?:" + "|".join(lat_extra) + ")" + LAT_SUFFIX)
+    if not groups:
+        return ""
+    body = "(?:" + "|".join(groups) + ")"
     if exact:
-        return r"^[\W_]*" + body + r"[\W_]*$"
-    return r"(?<!\w)" + body + r"(?!\w)"
+        return "^" + _NOT_WORD + "*" + body + _NOT_WORD + "*$"
+    return "(?<!" + _WORD + ")" + body + "(?!" + _WORD + ")"
 
 
 def matches(pattern, text):
-    return re.search(pattern, fa.normalize(text) if text else "", re.I) is not None or \
-        re.search(pattern, text or "", re.I) is not None
+    """Exactly what the automation does: the printed pattern on the raw comment, flag i."""
+    return re.search(pattern, text or "", re.I) is not None
 
 
 # ------------------------------------------------------------ CLI
@@ -442,6 +675,10 @@ def main(argv=None):
         print("کلمه‌ی کامنت خالی است. یک کلمه بده، مثلاً: python3 -I keyword.py \"آرتیفکت\"", file=sys.stderr)
         return 2
     pattern = build_regex(items, exact=a.exact)
+    if not pattern or re.search(pattern, "", re.I):
+        print("این کلمه فقط علامت است و regex آن هر کامنتی را می‌گیرد. "
+              "کلمه‌ای بده که حرف یا عدد داشته باشد.", file=sys.stderr)
+        return 2
     shown = items[:a.max]
     tests = [(t, matches(pattern, t)) for t in a.test]
 
@@ -453,6 +690,7 @@ def main(argv=None):
                          for v, s, why in shown],
             "regex": pattern,
             "regex_flags": "i",
+            "regex_flavor": "python, javascript (ES2018+), pcre",
             "regex_mode": "exact" if a.exact else "contains",
             "tests": [{"comment": t, "match": m} for t, m in tests],
             "note": "امتیازها تخمینی‌اند (قاعده‌ی سرانگشتی)، نه شمارش واقعی کامنت‌ها.",
@@ -462,7 +700,7 @@ def main(argv=None):
 
     if a.regex:
         print(pattern)
-        print("حساس به حروف بزرگ/کوچک نباشد (فلگ i). "
+        print("حساس به حروف بزرگ/کوچک نباشد (فلگ i)؛ در پایتون و جاوااسکریپت یکسان کار می‌کند. "
               + ("فقط وقتی می‌گیرد که کل کامنت همین کلمه باشد." if a.exact
                  else "هر کامنتی که این کلمه را داشته باشد می‌گیرد."), file=sys.stderr)
         for t, m in tests:
@@ -485,14 +723,14 @@ def main(argv=None):
         print(v)
     print("```")
     print()
-    print("یک regex که همه‌ی %s شکل را می‌گیرد (بدون حساسیت به حروف بزرگ/کوچک):"
+    print("یک regex که همه‌ی %s شکل را می‌گیرد (فلگ i، در پایتون و جاوااسکریپت یکسان):"
           % fa.to_fa_digits(str(len(items))))
     print("```")
     print(pattern)
     print("```")
     if tests:
         print()
-        print("امتحان کامنت‌ها:")
+        print("امتحان کامنت‌ها (با همین regex، روی متن خام کامنت):")
         for t, m in tests:
             print("  %s  %s" % ("می‌گیرد  " if m else "نمی‌گیرد", t))
     print()

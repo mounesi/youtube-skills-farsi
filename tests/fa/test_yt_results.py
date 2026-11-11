@@ -77,7 +77,8 @@ class TestValues(unittest.TestCase):
 
     def test_checked_at(self):
         for raw, want in (("24h", "24h"), ("۲۴ ساعت", "24h"), ("1d", "24h"), ("روز", "24h"),
-                          ("7d", "7d"), ("۷ روز", "7d"), ("هفته", "7d"), ("1w", "7d"), ("48h", "48h"),
+                          ("7d", "7d"), ("۷ روز", "7d"), ("هفته", "7d"), ("1w", "7d"), ("48h", "2d"),
+                          ("2d", "2d"), ("168h", "7d"), ("۲۴ ساعته", "24h"), ("۷ روزه", "7d"), ("36h", "36h"),
                           ("24", "24h"), ("7", "7d")):
             self.assertEqual(res.norm_checked(raw), want, raw)
         with self.assertRaises(res.InputError):
@@ -248,6 +249,155 @@ class TestReport(Base):
         code, out, err = run("--log", self.csv, "--report")
         self.assertEqual(code, 0, err)
         self.assertIn("بازدید صفر است", out)
+
+
+class TestStrictValues(unittest.TestCase):
+    """Fixes from the review: never keep half a number, never store an estimate."""
+
+    def test_watch_time_forms(self):
+        for raw in ("1:23", "۱:۲۳", "1m 23s", "۱ دقیقه و ۲۳ ثانیه", "83", "۸۳ ثانیه"):
+            self.assertEqual(res.parse_value("avg_watch_s", raw), "83", raw)
+        self.assertEqual(res.parse_value("avg_watch_s", "۲ دقیقه"), "120")  # never 2, never 2,000,000
+        for raw in ("زیاد", "1:75", "یه کم"):
+            with self.assertRaises(res.InputError, msg=raw):
+                res.parse_value("avg_watch_s", raw)
+
+    def test_whole_number_or_error(self):
+        for raw, want in (("12 400", "12400"), ("۱۲ ۴۰۰", "12400"), ("12 400", "12400"),
+                          ("۱۲ هزار و ۴۰۰", "12400"), ("۱ میلیون و ۲۰۰ هزار", "1200000"),
+                          ("۱۲ هزار و چهارصد", "12400"), ("۱۵٫۰۰۰", "15"), ("12,400", "12400"),
+                          ("1.2K", "1200"), ("۱٫۲ هزار", "1200"), ("4.5M views", "4500000"),
+                          ("۱۲ هزار بازدید", "12000")):
+            self.assertEqual(res.parse_value("views", raw), want, raw)
+        self.assertEqual(res.parse_value("non_follower_pct", "45%"), "45")
+        for raw in ("12 40", "1 2 3", "۱ هزار و ۲ میلیون", "1.000", "12 views 400"):
+            with self.assertRaises(res.InputError, msg=raw):
+                res.parse_value("views", raw)
+
+    def test_estimates_and_ranges_rejected(self):
+        for raw in ("حدود ۲۰۰", "بیش از ۱۰ هزار", "220 تا 250", "12K-13K", "~200", "200+",
+                    "حدوداً ۲۰۰", "about 200"):
+            with self.assertRaises(res.InputError, msg=raw):
+                res.parse_value("follows", raw)
+        self.assertEqual(res.parse_value("views", "۱/۵ میلیون"), "1500000")  # '/' is a decimal, not a range
+
+    def test_platform_and_format_names(self):
+        self.assertEqual(res.parse_value("format", "ویدئو"), "long")
+        self.assertEqual(res.parse_value("format", "Reels"), "reel")
+        self.assertEqual(res.parse_value("platform", "تیک تاک"), "tiktok")
+        self.assertEqual(res.parse_value("platform", "فیس بوک"), "facebook")
+        for col, raw in (("platform", "instgram"), ("platform", "YouTube Shorts"), ("format", "Reels video")):
+            with self.assertRaises(res.InputError, msg=raw):
+                res.parse_value(col, raw)
+
+    def test_ambiguous_share_key(self):
+        base = ["video_id=a", "platform=ig", "format=reel", "checked_at=24h"]
+        with self.assertRaises(res.InputError):
+            res.parse_pairs(base + ["اشتراک=20"])
+        self.assertEqual(res.parse_pairs(base + ["اشتراک‌گذاری=20"])["shares"], "20")
+
+    def test_small_rates_keep_their_digits(self):
+        self.assertEqual(res.fanum(0.05), "۰٫۰۵")
+        self.assertNotEqual(res.fanum(0.05), res.fanum(0.1))
+        self.assertEqual(res.fanum(0.004), "۰٫۰۰۴")
+
+
+class TestLogRobust(Base):
+    def add(self, *pairs, extra=()):
+        return run("--log", self.csv, "--add", *pairs, *extra)
+
+    def test_unquoted_spaced_views(self):
+        code, out, err = self.add("video_id=a", "platform=ig", "format=reel", "checked_at=24h",
+                                  "views=12", "400")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(read_rows(self.csv)[0]["views"], "12400")
+
+    def test_file_without_final_newline(self):
+        self.assertEqual(self.add("video_id=r1", "platform=ig", "format=reel", "checked_at=24h", "views=100",
+                                  extra=("--today", "2000-01-01"))[0], 0)
+        with io.open(self.csv, "rb") as f:
+            data = f.read().rstrip(b"\r\n")
+        with io.open(self.csv, "wb") as f:
+            f.write(data)
+        self.assertEqual(self.add("video_id=r2", "platform=ig", "format=reel", "checked_at=24h", "views=500")[0], 0)
+        header, rows = res.read_log(self.csv)
+        self.assertEqual([r["video_id"] for r in rows], ["r1", "r2"])
+        self.assertEqual(rows[0]["logged_on"], "2000-01-01")
+
+    def test_bad_files_are_clean_errors(self):
+        good = "video_id,platform,format,checked_at,views\n"
+        cases = {
+            "cp1252": (good + "a,instagram,reel,24h,10\n").encode("utf-8") + "caf\xe9\n".encode("cp1252"),
+            "utf16": (good + "a,instagram,reel,24h,10\n").encode("utf-16"),
+            "nul": (good + "a,instagram,reel,24h,1\x000\n").encode("utf-8"),
+            "huge": (good + "a,instagram,reel,24h,\"" + "x" * 140000 + "\"\n").encode("utf-8"),
+        }
+        for name, data in cases.items():
+            with io.open(self.csv, "wb") as f:
+                f.write(data)
+            code, out, err = run("--log", self.csv, "--report")
+            self.assertEqual(code, 2, (name, err))
+            self.assertIn("خطا:", err, name)
+            self.assertNotIn("Traceback", err, name)
+
+    def test_video_id_digits_fold(self):
+        base = ["platform=ig", "format=reel"]
+        self.assertEqual(self.add("video_id=ریلز-۰۷", *base, "checked_at=24h", "views=1000",
+                                  "tested=هوک سؤالی")[0], 0)
+        code, out, err = self.add("video_id=ریلز-07", *base, "checked_at=24h", "views=2000")
+        self.assertEqual(code, 2)
+        self.assertIn("--replace", err)
+        self.assertEqual(self.add("video_id=ریلز-07", *base, "checked_at=7d", "views=3000")[0], 0)
+        code, out, err = run("--log", self.csv, "--report", "--json", "--video", "ریلز-07", "--checked", "7d")
+        self.assertEqual(code, 0, err)
+        a = json.loads(out)
+        self.assertEqual(a["row"]["tested"], "هوک سؤالی")
+        self.assertAlmostEqual(a["growth_7d_vs_24h"], 3.0)
+
+    def test_hand_edited_rows_group(self):
+        with io.open(self.csv, "w", encoding="utf-8-sig", newline="") as f:
+            f.write("video_id,platform,format,checked_at,views,follows\n"
+                    "v1,instagram,reel,24h,1000,10\nv2,instagram,reel,24h,1000,10\n"
+                    "v3,instagram,reel,24h,1000,10\nv4,Instagram,Reels,24 h,1000,30\n")
+        code, out, err = run("--log", self.csv, "--report", "--json")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["baseline_n"], 3)
+
+
+class TestReportEdges(Base):
+    def write(self, lines):
+        with io.open(self.csv, "w", encoding="utf-8-sig", newline="") as f:
+            f.write("video_id,platform,format,checked_at,tested,views,shares,follows\n" + "\n".join(lines) + "\n")
+
+    def test_zero_median_is_high(self):
+        self.write(["a,instagram,reel,24h,,1000,0,", "b,instagram,reel,24h,,1000,0,",
+                    "c,instagram,reel,24h,,1000,0,", "d,instagram,reel,24h,,1000,50,"])
+        code, out, err = run("--log", self.csv, "--report", "--json")
+        a = json.loads(out)
+        sh = [m for m in a["metrics"] if m["metric"] == "shares_1k"][0]
+        self.assertEqual(sh["verdict"], "high")
+        code, out, err = run("--log", self.csv, "--report")
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("هیچ نرخی", out)
+        self.assertIn("میانه‌ی قبلی صفر بود", out)
+
+    def test_confirmation_is_symmetric(self):
+        self.write(["a,instagram,reel,24h,,10000,,100", "b,instagram,reel,24h,,10000,,100",
+                    "c,instagram,reel,24h,,10000,,100", "d,instagram,reel,24h,X,10000,,146",
+                    "e,instagram,reel,24h,X,10000,,200"])
+        for vid, other in (("d", "e"), ("e", "d")):
+            code, out, err = run("--log", self.csv, "--report", "--json", "--video", vid)
+            self.assertEqual(code, 0, err)
+            self.assertEqual(json.loads(out)["confirm"]["follows_1k"], [other], vid)
+
+    def test_small_rates_differ_in_report(self):
+        with io.open(self.csv, "w", encoding="utf-8-sig", newline="") as f:
+            f.write("video_id,platform,format,checked_at,views,follows\n"
+                    "a,youtube,long,24h,40000,2\nb,youtube,long,24h,40000,2\n"
+                    "c,youtube,long,24h,40000,2\nd,youtube,long,24h,40000,4\n")
+        code, out, err = run("--log", self.csv, "--report")
+        self.assertEqual(code, 0, err)
+        self.assertIn("فالو در هر ۱۰۰۰ بازدید: ۰٫۱۰ · میانه ۰٫۰۵ · ۲٫۰×", out)
 
 
 class TestPortable(unittest.TestCase):

@@ -73,11 +73,13 @@
     "\\bاشتباه\\S* (رو|را) (داری|دارید|میکنی|میکنید)\\b",
     "\\bدلیل(ش)? (اینه|این است|همینه) که\\b",
     "\\b(مشکل|ایراد|تقصیر) (از|تو|توی|با) \\S+ نیست\\b",
+    "\\b(هدر|حروم|تلف) (میدی|میکنی|میدید|میکنید)\\b",
     "\\byou('re| are) (probably |still )?(doing|making)\\b",
     "\\bthe (mistake|reason) (everyone|most people|nobody)\\b",
     "\\bstop (doing )?\\b",
     "\\b(is|are) (the reason |why )(nobody|no one|people|viewers|you)\\b",
-    "\\bit('s| is) not (the|your)\\b"
+    "\\bit('s| is) not (the|your)\\b",
+    "\\byou('re| are)? wast(e|ing)\\b"
    ]
   },
   {
@@ -92,12 +94,10 @@
    "fails_when_en": "Needs evidence in the next 15 seconds or it reads as contrarian for its own sake.",
    "match": [
     "\\bهمه (میگن|میگند|فکر میکنن|بهت میگن|بهتون میگن)\\b",
+    "\\bهمه (میگن|فکر میکنن)\\b.{0,80}\\b(ولی|اما) من\\b",
     "\\b(غلطه|دروغه|اشتباهه|افسانه است|افسانهست)\\b",
-    "\\b(هیچکس|کسی) (بهت |بهتون )?(نمیگه|نمیگن|حرفش رو نمیزنه|ازش حرف نمیزنه)\\b",
-    "\\b(ولی|اما) من\\b",
     "\\beveryone (says|thinks|tells you)\\b",
-    "\\bis (actually )?wrong\\b",
-    "\\bnobody (tells|talks about)\\b"
+    "\\bis (actually )?wrong\\b"
    ]
   },
   {
@@ -112,6 +112,7 @@
    "fails_when_en": "You have to actually show it, early. A reveal at 8:00 is a retention cliff at 1:00.",
    "match": [
     "\\bنشونت(ون)? (بدم|میدم)\\b",
+    "\\b(بهت|بهتون|بهتان|براتون|برات) (نشون|نشان) (میدم|بدم|میدیم|بدیم|میدهم)\\b",
     "\\b(روی|رو) (صفحه|مانیتور|اسکرین)\\b",
     "\\b(ایناهاش|اینجاست|اینم از)\\b",
     "\\bمیخوام .{0,40}(نشون|بهت نشون)",
@@ -153,7 +154,8 @@
     "\\b(تا|توی|تو|ظرف|در|زیر|کمتر از) (\\d+|یک|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پونزده|پانزده|شونزده|شانزده|هفده|هجده|هیجده|نوزده|بیست|سی|چهل|پنجاه|شصت|هفتاد|هشتاد|نود|صد|دویست|سیصد|چهارصد|پانصد|پونصد|ششصد|هفتصد|هشتصد|نهصد|هزار|یه) (ثانیه|دقیقه|ساعت)(ی|ه)?\\b",
     "\\b(تا )?اخر (این )?(ویدیو|ویدئو)\\b",
     "\\b(\\d+|یک|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پونزده|پانزده|شونزده|شانزده|هفده|هجده|هیجده|نوزده|بیست|سی|چهل|پنجاه|شصت|هفتاد|هشتاد|نود|صد|دویست|سیصد|چهارصد|پانصد|پونصد|ششصد|هفتصد|هشتصد|نهصد|هزار|یه) (ثانیه|دقیقه|ساعت)(ی|ه)? (دیگه|بعد)\\b",
-    "\\b(داری|خواهی داشت|دارید|خواهید داشت)[.!؟?]?\\s*$",
+    "\\b(خواهی داشت|خواهید داشت)[.!؟?]?\\s*$",
+    "\\b(تا اخر|بعد از|ظرف|تا) .{0,40}\\b(داری|دارید)[.!؟?]?\\s*$",
     "\\b(in|within) (the next )?(\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty|ninety|a hundred|hundred|a thousand|thousand) (seconds|minutes|hours)\\b",
     "\\bby the end of this video\\b",
     "\\bunder (\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty|ninety|a hundred|hundred|a thousand|thousand) (seconds|minutes|hours)\\b",
@@ -334,9 +336,11 @@
     "\\b(هیچکس|کسی|بیشتر ادما|اکثرا) .{0,20}(بازش|باز|نگاش|سراغش|ازش استفاده)\\s?(نمیکنه|نمیکنن|نمیره|نمیرن)\\b",
     "\\b(قایم|مخفی|پنهان|پنهون|پشت پرده|پشت صحنه)",
     "\\b(یوتیوب|اینستاگرام|الگوریتم|گوگل) (بهت|بهتون) (میگه|نشون میده)\\b",
+    "\\b(هیچکس|کسی) (بهت |بهتون )?(نمیگه|نمیگن|حرفش رو نمیزنه|ازش حرف نمیزنه)\\b",
     "\\b(nobody|almost nobody|most people) (knows?|opens?|uses?)\\b",
     "\\bhidden\\b",
-    "\\bburied\\b"
+    "\\bburied\\b",
+    "\\bnobody (tells|talks about)\\b"
    ]
   },
   {

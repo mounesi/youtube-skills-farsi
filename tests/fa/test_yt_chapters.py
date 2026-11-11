@@ -20,6 +20,19 @@ def fx(name):
     return os.path.join(FIX, name)
 
 
+def fmt(t):
+    ms = int(round(t * 1000))
+    return "%02d:%02d:%02d,%03d" % (ms // 3600000, ms // 60000 % 60, ms // 1000 % 60, ms % 1000)
+
+
+def load_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("yt_chapters_under_test", TOOL)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def run(*args, stdin=None, tool=TOOL):
     return subprocess.run([sys.executable, "-I", tool] + list(args), input=stdin,
                           capture_output=True, text=True, timeout=60)
@@ -73,8 +86,67 @@ class DraftTest(unittest.TestCase):
 
     def test_directory_as_input_does_not_crash(self):
         r = run(FIX)
-        self.assertEqual(r.returncode, 1)
+        self.assertEqual(r.returncode, 2)          # bad input, as SKILL.md defines exit 2
         self.assertNotIn("Traceback", r.stderr)
+
+    def test_broken_or_short_transcript_is_bad_input_with_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            broken = os.path.join(tmp, "bad.json")
+            with open(broken, "w", encoding="utf-8") as f:
+                f.write('{"segments": [')
+            r = run(broken, "--json")
+            self.assertEqual(r.returncode, 2)
+            self.assertIn("خراب", r.stderr)
+            self.assertFalse(json.loads(r.stdout)["valid"])
+            short = os.path.join(tmp, "short.srt")
+            with open(short, "w", encoding="utf-8") as f:
+                f.write("1\n00:00:00,000 --> 00:00:02,000\nسلام\n")
+            r = run(short, "--json")
+            self.assertEqual(r.returncode, 2)
+            self.assertIn("کوتاه", json.loads(r.stdout)["error"])
+            r = run(os.path.join(tmp, "nope.srt"), "--json")
+            self.assertEqual(r.returncode, 2)
+            self.assertIn("error", json.loads(r.stdout))
+
+    def test_spacing_grows_with_length_so_each_topic_gets_a_chapter(self):
+        # 7 topics of 3 minutes; topic changes are a 1.5 s pause plus new words; topic 4 is a screen
+        # demo with 2.5 s pauses between every line (the old 10 s spacing put two chapters at its edges).
+        import random
+        rnd = random.Random(7)
+        vocab = ["تامبنیل صورت درشت رنگ متن کلیک", "عنوان گوگل کلیدی جستجو واژه سرچ",
+                 "توضیحات لینک پلی‌لیست هشتگ خلاصه منبع", "تنظیمات دکمه برنامه صفحه منو پنجره",
+                 "بیننده ساعت ایران انتشار روز هفته", "نمودار ریتنشن آمار افت درصد دقیقه",
+                 "کامنت سابسکرایب پاسخ دعوت پرسش جامعه"]
+        cues, t, n, topic_starts = [], 0.0, 1, []
+        for k, words in enumerate(vocab):
+            topic_starts.append(t)
+            pool, gap, topic_end = words.split(), (2.5 if k == 3 else 0.3), t + 180
+            while t + 3 <= topic_end:
+                text = " ".join(rnd.choice(pool) for _ in range(6))
+                cues.append("%d\n%s --> %s\n%s\n" % (n, fmt(t), fmt(t + 3), text))
+                t += 3 + gap
+                n += 1
+            t += 1.5
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "demo.srt")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(cues))
+            d = json.loads(run(path, "--json").stdout)
+        starts = [c["start"] for c in d["chapters"]]
+        gap_min = d["duration"] / (2 * 7)
+        self.assertEqual(len(starts), 7)
+        for a, b in zip(starts, starts[1:]):
+            self.assertGreaterEqual(b - a, gap_min, starts)
+        # one chapter on each topic change
+        for want, got in zip(topic_starts, starts):
+            self.assertLess(abs(want - got), 5, (topic_starts, starts))
+
+    def test_spoken_function_words_and_zwnj_less_verbs_are_not_title_words(self):
+        mod = load_module()
+        self.assertEqual(mod.keywords("اگه سوالی درباره‌ی انتشار داری"), {"سوالی", "انتشار"})
+        kept = mod.keywords("میوه بزرگ برنامه میلیون")
+        self.assertEqual(kept, {"میوه", "بزرگ", "برنامه", "میلیون"})
+        self.assertEqual(mod.keywords("میکنیم میگیره بگیرید کردیم براتون واسه سلام"), set())
 
 
 class CheckTest(unittest.TestCase):
@@ -145,6 +217,80 @@ class CheckTest(unittest.TestCase):
         d = json.loads(run("--check", "-", "--duration", "1:10:00", "--json", stdin=raw).stdout)
         self.assertTrue(d["valid"], d["errors"])
         self.assertEqual(d["chapters"][2]["start"], 3605)
+
+    def test_last_chapter_after_subtitles_end_is_a_warning_not_an_error(self):
+        raw = "0:00 تامبنیلی که کلیک می‌گیره\n0:40 عنوان\n2:00 بهترین ساعت انتشار\n2:40 پشت صحنه و موسیقی پایانی\n"
+        r = run("--check", "-", fx("talk_fa.srt"), "--json", stdin=raw)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        d = json.loads(r.stdout)
+        self.assertEqual(d["duration_source"], "transcript")
+        self.assertFalse(d["last_checked"])
+        self.assertIn("--duration", "\n".join(d["warnings"]))
+        r = run("--check", "-", "--duration", "2:38", "--json", stdin=raw)
+        self.assertEqual(r.returncode, 1)
+        d = json.loads(r.stdout)
+        self.assertEqual(d["duration_source"], "flag")
+        self.assertIn("فصل آخر", "\n".join(d["errors"]))
+
+    def test_trailing_clock_time_in_description_is_not_a_chapter(self):
+        raw = ("0:00 تامبنیلی که کلیک می‌گیره\n0:40 عنوانی که پیدا میشه\n1:20 توضیحات درست\n\n"
+               "پخش زنده هر جمعه ساعت ۲۱:۰۰\nRecorded at 10:30\n")
+        r = run("--check", "-", "--duration", "3:00", "--json", stdin=raw)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        d = json.loads(r.stdout)
+        self.assertEqual([c["label"] for c in d["chapters"]], ["0:00", "0:40", "1:20"])
+        warns = "\n".join(d["warnings"])
+        self.assertIn("خط ۵ زمان دارد ولی فصل حساب نشد", warns)
+        self.assertNotIn("رقم فارسی", warns)
+        # a list written only with trailing times still works
+        mod = load_module()
+        self.assertEqual([i["start"] for i in mod.parse_list("مقدمه (۰۰:۰۰)\nدوم - 0:40\nسوم | 1:20\n")],
+                         [0, 40, 80])
+        self.assertEqual(mod.parse_list("Recorded at 10:30"), [])
+
+    def test_emoji_and_list_number_prefixes(self):
+        mod = load_module()
+        for line in ("⏱ 0:00 intro", "🎬 0:00 intro", "▶️ 0:00 intro", "1️⃣ 0:00 intro", "1. 0:00 intro",
+                     "۱. ۰:۰۰ intro", "1) 0:00 intro", "#1 0:00 intro", "* 0:00 intro"):
+            items = mod.parse_list(line)
+            self.assertEqual([(i["start"], i["title"]) for i in items], [(0.0, "intro")], line)
+        self.assertEqual([(i["start"], i["title"]) for i in mod.parse_list("1:00 x")], [(60.0, "x")])
+        skipped = []
+        mod.parse_list("0:00 a\nنکته‌ای که 1:00 وسطش آمده\n", skipped)
+        self.assertEqual(skipped, [2])
+
+    def test_ranges_and_decimal_seconds(self):
+        mod = load_module()
+        items = mod.parse_list("00:00 - 10:00 range")
+        self.assertEqual((items[0]["start"], items[0]["title"]), (0.0, "range"))
+        for line in ("0:10.5 title", "01:05:5 x"):
+            items = mod.parse_list(line)
+            self.assertEqual(len(items), 1, line)
+            self.assertIsNone(items[0]["start"], line)
+        raw = "0:00 الف\n0:10.5 ب\n1:00 پ\n2:00 ت\n"
+        d = json.loads(run("--check", "-", "--duration", "3:00", "--json", stdin=raw).stdout)
+        self.assertFalse(d["valid"])
+        self.assertIn("0:10.5", "\n".join(d["errors"]))
+
+    def test_broken_or_unreadable_transcript_in_check_is_exit_2(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            broken = os.path.join(tmp, "bad.json")
+            with open(broken, "w", encoding="utf-8") as f:
+                f.write('{"segments": [')
+            r = run("--check", fx("chapters_ok_fa.txt"), broken, "--json")
+            self.assertEqual(r.returncode, 2)
+            self.assertIn("خراب", r.stderr)
+            self.assertFalse(json.loads(r.stdout)["valid"])
+            noperm = os.path.join(tmp, "noperm.srt")
+            shutil.copy(fx("talk_fa.srt"), noperm)
+            os.chmod(noperm, 0)
+            try:
+                if not os.access(noperm, os.R_OK):          # root can still read it
+                    r = run("--check", fx("chapters_ok_fa.txt"), noperm, "--json")
+                    self.assertEqual(r.returncode, 2)
+                    json.loads(r.stdout)
+            finally:
+                os.chmod(noperm, 0o600)
 
     def test_missing_list_file_is_exit_2(self):
         r = run("--check", fx("nope.txt"))

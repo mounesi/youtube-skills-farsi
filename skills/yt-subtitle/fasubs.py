@@ -4,7 +4,7 @@
   python3 -I fasubs.py subs.srt                 گزارش ایرادها (خطا / هشدار)
   python3 -I fasubs.py subs.srt --fix           فایل اصلاح‌شده‌ی subs.fixed.srt (فقط اصلاح‌های بی‌خطر)
   python3 -I fasubs.py subs.srt --fix --out final.srt
-  python3 -I fasubs.py subs.srt --unsure        جدول «شنیده → نوشته» برای تأیید سازنده
+  python3 -I fasubs.py subs.srt --unsure        جدول «شنیده ← نوشته» برای تأیید سازنده
   python3 -I fasubs.py subs.srt --json          خروجی JSON
 
 گزینه‌ها:
@@ -16,12 +16,15 @@
   --max-dur 7       بلندترین زمان نمایش (ثانیه)
   --digits fa|ascii همراه --fix: همه‌ی رقم‌های متن (جز داخل اسم‌های لاتین مثل GPT-5) یکدست شوند
   --rlm             همراه --fix: اول خط فارسی‌ای که با کلمه‌ی لاتین یا رقم شروع می‌شود نشانه‌ی RLM بگذار
+  --force           همراه --fix: فایل خروجی‌ای را که از قبل هست (شاید دستی اصلاحش کرده‌ای) بازنویسی کن
 
 --fix هیچ کلمه‌ای را عوض نمی‌کند. فقط این‌ها را درست می‌کند: حرف عربی (ي ى ك ← ی ک)، رقم عربی (٤ ← ۴)،
-نیم‌فاصله در الگوهای شناخته‌شده (می / نمی / ها / های / ترین / ‌ام و ‌ای بعد از «ه»)، و نشانه‌ی لاتین
-کنار متن فارسی (? , ; ← ؟ ، ؛). مواردی که مطمئن نیست را فقط هشدار می‌دهد.
+نیم‌فاصله در الگوهای شناخته‌شده (می / نمی / ها / های / ترین / ‌ی و ‌ام و ‌ای بعد از «ه»)، نشانه‌ی لاتین
+کنار متن فارسی (? , ; ← ؟ ، ؛) و رقم فارسی در خط زمان‌بندی (← رقم انگلیسی). مواردی که مطمئن نیست را
+فقط هشدار می‌دهد. خروجی همیشه UTF-8 است (فایل Windows-1256 هم خوانده می‌شود).
 
-خروج: ۰ = بدون خطا، ۱ = خطا پیدا شد، ۲ = ورودی یا گزینه‌ی نادرست.
+خروج: ۰ = بدون خطا، ۱ = خطا پیدا شد (همراه --fix: هنوز در فایل اصلاح‌شده خطا مانده)،
+۲ = ورودی یا گزینه‌ی نادرست.
 """
 import json
 import os
@@ -47,16 +50,44 @@ WCH = r"[^\s،,.!?؟؛;:«»\"“”()\[\]<>{}…\-–—]"
 # letters that never join the next one: a suffix after them needs no ZWNJ («ویدیوها»، «دورتر»)
 NON_JOINING = frozenset("اآأإدذرزژوؤة")
 ARABIC_LETTERS = {"ي": "ی", "ى": "ی", "ك": "ک"}
+# Arabic presentation forms (text pasted from a PDF or an old editor, e.g. «ﻻ», «ﻳ»): they look right
+# on screen but search and YouTube treat them as different letters; NFKC turns them back into letters
+_PRESENTATION = re.compile("[\uFB50-\uFDFF\uFE70-\uFEFE]+")
+
+
+def _unpresent(seg):
+    return _PRESENTATION.sub(lambda m: unicodedata.normalize("NFKC", m.group(0)), seg)
+
+
 ARABIC_DIGITS = {c: "۰۱۲۳۴۵۶۷۸۹"[i] for i, c in enumerate("٠١٢٣٤٥٦٧٨٩")}
 LATIN_PUNCT = {"?": "؟", ",": "،", ";": "؛"}
 
 _HA_SUFFIXES = sorted(["ها", "های", "هایی", "هایم", "هایت", "هایش", "هایمان", "هایتان", "هایشان",
                        "هام", "هات", "هاش", "هامون", "هاتون", "هاشون", "هامان", "هاتان", "هاشان"],
                       key=len, reverse=True)
-MI_RE = re.compile(r"(?<!" + L + r")(ن?می) (" + L + WCH + r"*)")
+# «می» after «ماه» or a number is the month May («ماه می سال گذشته»، «۱۵ می امسال»), not the verb prefix
+MI_RE = re.compile(r"(?<!" + L + r")(نمی|(?<!ماه )(?<![0-9۰-۹] )می) (" + L + WCH + r"*)")
+MONTH_MI_RE = re.compile(r"(?<!" + L + r")(?:(?<=ماه )|(?<=[0-9۰-۹] ))(می) (" + L + WCH + r"*)")
 HA_RE = re.compile(r"(" + WCH + r"*" + L + r") (" + "|".join(_HA_SUFFIXES) + r")(?!" + L + "|" + ZWNJ + ")")
 TAR_RE = re.compile(r"(" + WCH + r"*" + L + r") (ترین|تری|تر)(?!" + L + "|" + ZWNJ + ")")
-AM_RE = re.compile(r"(" + WCH + r"*" + L + L + r"ه) (ام|ای|ایم|اید|اند)(?!" + L + "|" + ZWNJ + ")")
+AM_RE = re.compile(r"(" + WCH + r"*" + L + L + r"ه) (ام|ای|ایم|اید|اند|ی)(?!" + L + "|" + ZWNJ + ")")
+
+# «ها»-forms that are also whole words: hash (هاش، هاش ریت)، hot (هات داگ)، Hamoun (هامون)، ham (هام)
+HA_AMBIGUOUS = frozenset(["هام", "هات", "هاش", "هامون", "هامان"])
+# imperatives / verbs: a «ها» after them is the emphasis «ها» («مواظب باش ها اینجا»), never a plural
+HA_VERB = frozenset("باش بیا برو بکن کن نکن ببین بگو نگو بشین وایسا بخور بزن نزن بدو بیار ببر بخون".split())
+_PLURAL_IMPERATIVE = re.compile("[بن]" + L + "+(?:ید|ین)")
+# «ترین» after these, or before a light verb, is the loanword "train" («مدل رو ترین کردیم»)
+TRAIN_BEFORE = frozenset(["رو", "را", "این", "اون", "یه"])
+_LIGHT_VERB = re.compile(r" (?:ب|ن|می" + ZWNJ + "|نمی" + ZWNJ + r"|می|نمی)?"
+                         r"(?:کردیم|کردن|کرده|کرد|کنیم|کنید|کنه|کنن|کن|شده|شد|شو|شه|بشه|میشه|ش|دادیم|دادن|داد|بدیم|بده|بدن)"
+                         r"(?:یم|ید|ین|ن|ه|ی|م)?(?!" + L + ")")
+# «ای» in «ای کاش»، «ای وای»، «ای خدا» is the vocative, not a suffix
+_VOCATIVE_NEXT = re.compile(r" (?:کاش|وای|خدا|بابا|داد|دل)(?!" + L + ")")
+# words whose final «ه» is spoken (not the silent «ه»): «گروه ای» is «گروهی»، not «گروه‌ای»
+PRONOUNCED_HE = ("گروه", "ماه", "راه", "اشتباه", "دانشگاه", "نگاه", "کوه", "شاه", "سپاه", "پگاه", "آگاه",
+                 "گناه", "تباه", "جایگاه", "پایگاه", "باشگاه", "کارگاه", "فروشگاه", "درگاه", "گاه", "سیاه", "چاه")
+_AM_SUFFIXES = frozenset(["ام", "ای", "ایم", "اید", "اند", "ی"])
 
 # adjectives/adverbs that take -تر in everyday subtitles; «تر» alone also means "wet", so only these
 # (or «… تر از») are fixed for sure, the rest is a warning
@@ -68,6 +99,11 @@ TAR_SURE = frozenset("""بزرگ کوچک بیش کم بد خوب سریع را�
 HA_SKIP = frozenset(["آ", "ا", "اه", "آه", "اوه"])
 
 TIMING_RE = re.compile(r"^\s*(\d[\d:.,٫]*)\s*-->\s*(\d[\d:.,٫]*)")
+# a line meant as timing but broken («00:00:03,500 -> 00:00:05,000»، end time missing)
+LOOSE_TIME_RE = re.compile(r"^\s*\d[\d:.,٫]*\s*(?:-{1,3}>|[–—]>|→)")
+# markup inside a cue line: tags (<i>, <00:00:01.500>, <font color="#00FF00">), SSA overrides ({\pos(1,2)}),
+# HTML entities (&rlm; &nbsp; &#8207;) - text fixes never touch them
+_MARKUP = re.compile(r"<[^>]*>|\{[^}]*\}|&(?:#\d+|#x[0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]*);")
 _LATIN_WORD = re.compile(r"[A-Za-zÀ-ɏ][A-Za-zÀ-ɏ0-9'’.+\-]*")
 _DIGIT = re.compile(r"\d")
 # a number not glued to a Latin name (GPT-5, 4o), with an optional unit or scale word
@@ -82,15 +118,17 @@ _SPELLED = re.compile(r"(?<!" + L + r")((?:(?:" + "|".join(sorted(_NUM_WORDS, ke
 LEVEL_FA = {"error": "خطا", "warn": "هشدار"}
 CODE_FA = {
     "bad-time": "زمان‌بندی نادرست",
+    "timing-digits": "رقم فارسی در زمان‌بندی",
     "empty": "زیرنویس خالی",
     "overlap": "هم‌پوشانی با زیرنویس قبلی",
     "order": "ترتیب زمانی به هم ریخته",
-    "arabic-letter": "حرف عربی (ي/ى/ك)",
+    "arabic-letter": "حرف عربی (ي/ى/ك یا شکل نمایشی مثل ﻻ)",
     "arabic-digit": "رقم عربی (٠-٩)",
     "zwnj": "نیم‌فاصله‌ی جاافتاده",
     "zwnj-maybe": "شاید نیم‌فاصله لازم باشد",
     "punct": "نشانه‌ی لاتین کنار متن فارسی",
     "line-long": "خط طولانی",
+    "capacity": "متن بیشتر از جای زیرنویس",
     "lines": "خط زیاد",
     "cps": "سرعت خواندن بالا",
     "short": "زمان نمایش کوتاه",
@@ -98,12 +136,14 @@ CODE_FA = {
     "gap": "فاصله‌ی کمتر از ۲ فریم",
     "digit-mix": "رقم فارسی و انگلیسی با هم",
     "rtl-start": "خط فارسی که با لاتین یا رقم شروع می‌شود",
+    "fix-unsafe": "اصلاح خودکار امن نبود",
 }
-LEVEL_OF = {"bad-time": "error", "empty": "error", "overlap": "error", "order": "error",
-            "arabic-letter": "error", "arabic-digit": "warn", "zwnj": "warn", "zwnj-maybe": "warn",
-            "punct": "warn", "line-long": "warn", "lines": "warn", "cps": "warn", "short": "warn",
-            "long": "warn", "gap": "warn", "digit-mix": "warn", "rtl-start": "warn"}
-FIXABLE = frozenset(["arabic-letter", "arabic-digit", "zwnj", "punct"])
+LEVEL_OF = {"bad-time": "error", "timing-digits": "error", "empty": "error", "overlap": "error",
+            "order": "error", "arabic-letter": "error", "arabic-digit": "warn", "zwnj": "warn",
+            "zwnj-maybe": "warn", "punct": "warn", "line-long": "warn", "capacity": "warn", "lines": "warn",
+            "cps": "warn", "short": "warn", "long": "warn", "gap": "warn", "digit-mix": "warn",
+            "rtl-start": "warn", "fix-unsafe": "warn"}
+FIXABLE = frozenset(["arabic-letter", "arabic-digit", "zwnj", "punct", "timing-digits"])
 
 
 class UsageError(Exception):
@@ -139,19 +179,71 @@ def visible_len(text):
 def display_line(line):
     """متن دیدنی یک خط زیرنویس (بدون برچسب <i> و {\\an8} و نشانه‌ی جهت)، بدون یکدست‌سازی."""
     t = fa.clean_cue_text(line, normalized=False)
-    return re.sub("[‎‏؜‪-‮⁦-⁩﻿]", "", t).strip()
+    return re.sub(_BIDI_MARKS, "", t).strip()
+
+
+# bidi / format marks: display_line hides them and _fix_zwnj may turn one inside a word into a ZWNJ
+_BIDI_MARKS = "[‎‏؜‪-‮⁦-⁩﻿]"
 
 
 def skeleton(text):
-    """«اسکلت» متن برای اطمینان از اینکه --fix کلمه‌ای را عوض نکرده: بدون فاصله و نیم‌فاصله و RLM،
-    حرف و رقم و نشانه یکدست."""
-    t = text
+    """«اسکلت» متن برای اطمینان از اینکه --fix کلمه‌ای را عوض نکرده: بدون فاصله و نیم‌فاصله و نشانه‌های
+    جهت (RLM، LRM و…)، حرف و رقم و نشانه یکدست."""
+    t = _unpresent(text)
     for a, b in ARABIC_LETTERS.items():
         t = t.replace(a, b)
     for a, b in LATIN_PUNCT.items():
         t = t.replace(a, b)
     t = fa.to_ascii_digits(t)
-    return re.sub(r"[\s" + ZWNJ + RLM + r"]", "", t)
+    return re.sub(r"[\s" + ZWNJ + "‎‏؜‪-‮⁦-⁩﻿]", "", t)
+
+
+def _rtl_marked(raw_line):
+    """خط از قبل با RLM (یا ALM یا &rlm;) شروع شده، حتی بعد از برچسبی مثل <i>."""
+    t = fa.clean_cue_text(raw_line, normalized=False).lstrip()
+    return t.startswith((RLM, "؜")) or raw_line.lstrip().lower().startswith(("&rlm;", RLM, "؜"))
+
+
+def _text_only(line, fn):
+    """fn را فقط روی متن بیرون از برچسب‌ها، {\\...} و موجودیت‌های HTML اجرا می‌کند."""
+    out, pos = [], 0
+    for m in _MARKUP.finditer(line):
+        out.append(fn(line[pos:m.start()]))
+        out.append(m.group(0))
+        pos = m.end()
+    out.append(fn(line[pos:]))
+    return "".join(out)
+
+
+def _markup_spans(line):
+    """جای هر نویسه‌ای که داخل برچسب، {\\...} یا موجودیت HTML است."""
+    spans = set()
+    for m in _MARKUP.finditer(line):
+        spans.update(range(m.start(), m.end()))
+    return spans
+
+
+def decode_text(data):
+    """بایت‌های فایل را سخت‌گیرانه می‌خواند. خروجی: (متن، کدگذاری). BOM در UTF-8 نگه داشته می‌شود
+    (تا --fix همان را بنویسد). UTF-16 با BOM و Windows-1256 (رایج در Subtitle Workshop و Notepad) هم
+    خوانده می‌شوند؛ هر چیز دیگر ValueError با پیام فارسی."""
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        try:
+            return data.decode("utf-16"), "utf-16"
+        except UnicodeDecodeError:
+            pass
+    else:
+        try:
+            return data.decode("utf-8"), "utf-8"
+        except UnicodeDecodeError:
+            pass
+        try:
+            text = data.decode("cp1256")
+        except UnicodeDecodeError:
+            text = None
+        if text is not None and re.search("[؀-ۿ]", text):
+            return text, "cp1256"
+    raise ValueError("فایل UTF-8 نیست؛ آن را با UTF-8 ذخیره کن")
 
 
 # ---------------------------------------------------------------- parsing
@@ -159,15 +251,21 @@ def skeleton(text):
 def parse_blocks(raw):
     """فایل SRT/VTT را به بلوک‌ها می‌شکند و خط‌ها را جدا نگه می‌دارد (برخلاف fa.parse_cues که خط‌ها را
     به هم می‌چسباند و زیرنویس خالی را دور می‌ریزد؛ بازبینی به هر دو نیاز دارد).
-    هر بلوک: {"n", "start", "end", "tline", "lines": [متن خام], "linenos": [شماره‌ی خط در فایل از ۰]}."""
+    هر بلوک: {"n", "start", "end", "tline", "traw", "lines": [متن خام], "linenos": [شماره‌ی خط در فایل از ۰]}.
+    خط زمان‌بندی خراب («->» به جای «-->»، زمان پایان جاافتاده) هم بلوک باز می‌کند (با start/end = None)
+    تا زیرنویسش بی‌صدا گم نشود و lint آن را خطای «زمان‌بندی نادرست» بگیرد."""
     raw = (raw or "").lstrip("﻿")
     lines = raw.splitlines()
     blocks, cur = [], None
+
+    def timing_like(s):
+        return bool(TIMING_RE.match(s) or LOOSE_TIME_RE.match(s) or "-->" in s)
+
     for i, line in enumerate(lines):
         m = TIMING_RE.match(line)
         if m:
             a, b = fa.parse_timestamp(m.group(1)), fa.parse_timestamp(m.group(2))
-            cur = {"n": len(blocks) + 1, "start": a, "end": b, "tline": i,
+            cur = {"n": len(blocks) + 1, "start": a, "end": b, "tline": i, "traw": line,
                    "lines": [], "linenos": []}
             blocks.append(cur)
             continue
@@ -175,8 +273,12 @@ def parse_blocks(raw):
             cur = None
             continue
         if cur is None:
+            if LOOSE_TIME_RE.match(line) or "-->" in line:
+                cur = {"n": len(blocks) + 1, "start": None, "end": None, "tline": i, "traw": line,
+                       "lines": [], "linenos": []}
+                blocks.append(cur)
             continue  # index lines, WEBVTT header, NOTE / STYLE blocks
-        if line.strip().isdigit() and i + 1 < len(lines) and TIMING_RE.match(lines[i + 1]):
+        if line.strip().isdigit() and i + 1 < len(lines) and timing_like(lines[i + 1]):
             cur = None  # SRT index with the blank line missing
             continue
         cur["lines"].append(line)
@@ -184,50 +286,60 @@ def parse_blocks(raw):
     return blocks
 
 
-def load_blocks(path):
-    """فایل را می‌خواند. JSON (ویسپر) با fa.load_cues خوانده می‌شود و هر cue یک خط است."""
+def load_blocks(path, with_encoding=False):
+    """فایل را می‌خواند. JSON (ویسپر) با fa.parse_cues خوانده می‌شود و هر cue یک خط است.
+    خروجی: (بلوک‌ها، متن خام، نوع) و با with_encoding=True کدگذاری هم در انتها.
+    فایلی که نه UTF-8 است نه UTF-16 نه Windows-1256: ValueError."""
     if os.path.isdir(path):
         raise OSError("پوشه است، نه فایل")
     with open(path, "rb") as fh:
         data = fh.read()
-    raw = data.decode("utf-8", errors="replace")  # keep the BOM so --fix can write it back
+    raw, enc = decode_text(data)  # the UTF-8 BOM stays in raw so --fix can write it back
+    if enc != "utf-8":
+        raw = raw.lstrip("\ufeff")  # the output is UTF-8; a UTF-16 BOM is not carried over
     stripped = raw.lstrip("\ufeff").lstrip()
     if path.lower().endswith(".json") or stripped.startswith(("{", "[")):
-        cues = fa.load_cues(path, normalized=False)
+        body = raw.lstrip("\ufeff")
+        jkind = "json" if path.lower().endswith(".json") else None
+        cues = fa.parse_cues(body, kind=jkind, normalized=False)
+        if not cues and jkind == "json":
+            cues = fa.parse_cues(body, kind=None, normalized=False)
         if cues or path.lower().endswith(".json"):
-            blocks = [{"n": i + 1, "start": c.start, "end": c.end, "tline": None,
+            blocks = [{"n": i + 1, "start": c.start, "end": c.end, "tline": None, "traw": None,
                        "lines": [c.text], "linenos": []} for i, c in enumerate(cues)]
-            return blocks, raw, "json"
+            return (blocks, raw, "json", enc) if with_encoding else (blocks, raw, "json")
     kind = "vtt" if stripped.startswith("WEBVTT") else "srt"
-    return parse_blocks(raw), raw, kind
+    blocks = parse_blocks(raw)
+    return (blocks, raw, kind, enc) if with_encoding else (blocks, raw, kind)
 
 
 # ---------------------------------------------------------------- text checks / safe fixes
 
 def _fix_letters(line, found):
-    out = line
-    for a, b in ARABIC_LETTERS.items():
-        if a in out:
-            out = out.replace(a, b)
+    def conv(seg):
+        seg = _unpresent(seg)
+        for a, b in ARABIC_LETTERS.items():
+            seg = seg.replace(a, b)
+        return seg
+
+    out = _text_only(line, conv)
     if out != line:
         words = []
-        for w in re.findall(WCH + "+", line):
-            if any(a in w for a in ARABIC_LETTERS) and w not in words:
+        for w in re.findall(WCH + "+", _MARKUP.sub(" ", line)):
+            if (any(a in w for a in ARABIC_LETTERS) or _PRESENTATION.search(w)) and w not in words:
                 words.append(w)
         for w in words:
-            new = w
-            for a, b in ARABIC_LETTERS.items():
-                new = new.replace(a, b)
-            found.append(("arabic-letter", w, new))
+            found.append(("arabic-letter", w, conv(w)))
     return out
 
 
 def _fix_arabic_digits(line, found):
     if not any(c in ARABIC_DIGITS for c in line):
         return line
-    out = "".join(ARABIC_DIGITS.get(c, c) for c in line)
-    for run in sorted(set(re.findall("[٠-٩]+", line))):
-        found.append(("arabic-digit", run, "".join(ARABIC_DIGITS[c] for c in run)))
+    out = _text_only(line, lambda seg: "".join(ARABIC_DIGITS.get(c, c) for c in seg))
+    if out != line:
+        for run in sorted(set(re.findall("[٠-٩]+", _MARKUP.sub(" ", line)))):
+            found.append(("arabic-digit", run, "".join(ARABIC_DIGITS[c] for c in run)))
     return out
 
 
@@ -246,8 +358,13 @@ def _fix_zwnj(line, found):
         if word in HA_SKIP or re.fullmatch("[هاآ]+", word):
             return m.group(0)  # «آ ها»، laughter «ها ها»
         rest = m.string[m.end():]
-        if suf == "ها" and not re.match(" " + L, rest):
-            # «ها» at the end of a sentence may be the interjection («مواظب باش ها!»)
+        if suf == "ها" and (word in HA_VERB or _PLURAL_IMPERATIVE.fullmatch(word)
+                            or not re.match(" " + L, rest)):
+            # «ها» after a verb, or at the end of a sentence, may be the emphasis «ها» («مواظب باش ها!»)
+            found.append(("zwnj-maybe", m.group(0), _join(word, suf)))
+            return m.group(0)
+        if suf in HA_AMBIGUOUS:
+            # also whole words: «قدرت هاش ریت»، «یه هات داگ»، «دریاچه هامون»
             found.append(("zwnj-maybe", m.group(0), _join(word, suf)))
             return m.group(0)
         new = _join(word, suf)
@@ -258,16 +375,29 @@ def _fix_zwnj(line, found):
         word, suf = m.group(1), m.group(2)
         rest = m.string[m.end():]
         bare = word.replace(ZWNJ, "")
-        sure = suf == "ترین" or word in TAR_SURE or bare in TAR_SURE or re.match(r" از(?!" + L + ")", rest)
+        if suf == "ترین" and (bare in TRAIN_BEFORE or _LIGHT_VERB.match(rest)):
+            return m.group(0)  # the loanword "train": «مدل رو ترین کردیم»، «باید مدل ترین بشه»
+        sure = word in TAR_SURE or bare in TAR_SURE or (
+            suf != "ترین" and re.match(r" از(?!" + L + ")", rest))
         new = _join(word, suf)
         if not sure:
-            found.append(("zwnj-maybe", m.group(0), new))  # «تر» alone also means "wet"
+            found.append(("zwnj-maybe", m.group(0), new))  # «تر» = "wet", «ترین» = "train"
             return m.group(0)
         found.append(("zwnj", m.group(0), new))
         return new
 
     def am(m):
-        new = m.group(1) + ZWNJ + m.group(2)
+        word, suf = m.group(1), m.group(2)
+        rest = m.string[m.end():]
+        if suf == "ای" and _VOCATIVE_NEXT.match(rest):
+            return m.group(0)  # «خلاصه ای کاش …»: the vocative «ای»
+        bare = word.replace(ZWNJ, "")
+        if bare.endswith("اه") or bare.endswith(PRONOUNCED_HE):
+            # the «ه» is spoken: «گروه ای» → «گروهی»، not «گروه‌ای»
+            sugg = word + "ی" if suf in ("ای", "ی") else word + ZWNJ + suf
+            found.append(("zwnj-maybe", m.group(0), sugg))
+            return m.group(0)
+        new = word + ZWNJ + suf
         found.append(("zwnj", m.group(0), new))
         return new
 
@@ -283,6 +413,9 @@ def _fix_zwnj(line, found):
 
     # doubled ZWNJ, or an RLM/LRM typed inside a word where a ZWNJ was meant («چی‏کار»)
     line = re.sub("(?<=" + L + ")(?:" + ZWNJ + "{2,}|[‎‏]+" + ZWNJ + "*)(?=" + L + ")", double, line)
+    for m in MONTH_MI_RE.finditer(line):
+        # «ماه می سال گذشته»: probably the month May; only a warning
+        found.append(("zwnj-maybe", m.group(0), m.group(1) + ZWNJ + m.group(2)))
     line = MI_RE.sub(mi, line)
     line = HA_RE.sub(ha, line)
     line = TAR_RE.sub(tar, line)
@@ -290,28 +423,30 @@ def _fix_zwnj(line, found):
     return line
 
 
-def _neighbor(text, i, step):
+def _neighbor(text, i, step, skip=frozenset()):
+    """نزدیک‌ترین نویسه‌ی واقعی کنار text[i]، با رد شدن از فاصله، RLM و برچسب / موجودیت HTML."""
     j = i + step
-    while 0 <= j < len(text) and text[j] in " \t" + RLM:
+    while 0 <= j < len(text) and (text[j] in " \t" + RLM or j in skip):
         j += step
     return text[j] if 0 <= j < len(text) else ""
 
 
 def _fix_punct(line, found):
     persian_line = fa.script_ratio(display_line(line)) >= 0.5
+    markup = _markup_spans(line)  # «;» of &rlm; / &nbsp; and anything inside <…> or {…} stays
     chars = list(line)
     for i, ch in enumerate(line):
-        if ch not in LATIN_PUNCT:
+        if ch not in LATIN_PUNCT or i in markup:
             continue
         before = line[i - 1] if i > 0 else ""
         after = line[i + 1] if i + 1 < len(line) else ""
         if before.isdigit() and after.isdigit():
             continue  # 12,400 / 1;2
-        prev, nxt = _neighbor(line, i, -1), _neighbor(line, i, 1)
+        prev, nxt = _neighbor(line, i, -1, markup), _neighbor(line, i, 1, markup)
         fa_near = bool(re.match(L, prev or "x")) or bool(re.match(L, nxt or "x"))
         tail = line[i + 1:]
         # a mark at the end of a Persian line («… یا Claude?») is Persian punctuation too
-        at_end = persian_line and re.match(r"^[\s!?؟.…»\"”)]*$", re.sub("<[^>]*>", "", tail)) is not None
+        at_end = persian_line and re.match(r"^[\s!?؟.…»\"”)]*$", _MARKUP.sub("", tail)) is not None
         if fa_near or at_end:
             chars[i] = LATIN_PUNCT[ch]
     out = "".join(chars)
@@ -335,14 +470,18 @@ def _strip_latin(text):
 def _fix_digits(line, target, found):
     if target not in ("fa", "ascii"):
         return line
-    parts, pos = [], 0
-    for m in _LATIN_WORD.finditer(line):
-        parts.append((line[pos:m.start()], True))
-        parts.append((m.group(0), False))
-        pos = m.end()
-    parts.append((line[pos:], True))
-    out = "".join((fa.to_fa_digits(p) if target == "fa" else fa.to_ascii_digits(p)) if conv else p
-                  for p, conv in parts)
+
+    def conv(seg):
+        parts, pos = [], 0
+        for m in _LATIN_WORD.finditer(seg):
+            parts.append((seg[pos:m.start()], True))
+            parts.append((m.group(0), False))
+            pos = m.end()
+        parts.append((seg[pos:], True))
+        return "".join((fa.to_fa_digits(p) if target == "fa" else fa.to_ascii_digits(p)) if c else p
+                       for p, c in parts)
+
+    out = _text_only(line, conv)  # never inside <00:00:01.500>, #00FF00 or {\pos(100,200)}
     if out != line:
         found.append(("digits", line.strip(), out.strip()))
     return out
@@ -351,16 +490,20 @@ def _fix_digits(line, target, found):
 def _add_rlm(line, found):
     shown = display_line(line)
     if shown and fa.script_ratio(shown) >= 0.5 and re.match(r"[A-Za-z0-9]", shown) \
-            and not line.lstrip().startswith(RLM):
+            and not _rtl_marked(line):
         found.append(("rlm", shown, RLM + shown))
         return RLM + line
     return line
 
 
+_REPORTED_WHEN_UNSAFE = frozenset(["arabic-letter", "arabic-digit", "punct", "zwnj", "zwnj-maybe"])
+
+
 def fix_line(line, digits=None, rlm=False):
     """اصلاح‌های بی‌خطر یک خط متن. خروجی: (خط جدید، فهرست (code, قبل, بعد)). موارد «شاید» با code
     zwnj-maybe در فهرست هستند ولی در خط جدید اعمال نشده‌اند. اگر «اسکلت» متن عوض شود (یعنی کلمه‌ای
-    تغییر کرده باشد) خط دست نمی‌خورد."""
+    تغییر کرده باشد) خط دست نمی‌خورد، ولی ایرادهای پیداشده باز در فهرست می‌مانند و یک مورد
+    («fix-unsafe»، خط، خط) هم اضافه می‌شود تا گزارش بگوید این خط را باید دستی درست کرد."""
     found = []
     out = _fix_letters(line, found)
     out = _fix_arabic_digits(out, found)
@@ -371,7 +514,8 @@ def fix_line(line, digits=None, rlm=False):
     if rlm:
         out = _add_rlm(out, found)
     if skeleton(line) != skeleton(out):
-        return line, [f for f in found if f[0] == "zwnj-maybe"]
+        kept = [f for f in found if f[0] in _REPORTED_WHEN_UNSAFE]
+        return line, kept + [("fix-unsafe", line.strip(), line.strip())]
     return out, found
 
 
@@ -397,6 +541,35 @@ def _digit_kinds(text):
     return kinds
 
 
+def _ascii_timing(part, sep):
+    """بخش زمان‌بندی یک خط («۰۰:۰۰:۰۱٫۰۰۰ --> …») با رقم انگلیسی؛ «٫» ← جداکننده‌ی قالب."""
+    return fa.to_ascii_digits(part).replace("٫", sep)
+
+
+def _maybe_msg(before, after):
+    """متن هشدار «شاید نیم‌فاصله لازم باشد» بسته به الگو."""
+    toks = before.split(" ")
+    first, last = toks[0], toks[-1]
+    if last == "ها":
+        return ("«%s»: اگر «ها» نشانه‌ی جمع است ← «%s»؛ اگر «ها»ی تأکید است («مواظب باش ها!») "
+                "درست است" % (before, after))
+    if last in HA_AMBIGUOUS:
+        return ("«%s»: اگر «%s» پسوند است ← «%s»؛ اگر کلمه‌ی جداست (هاش، هات داگ، هامون) درست است"
+                % (before, last, after))
+    if last == "ترین":
+        return ("«%s»: اگر «ترین» پسوند صفت است ← «%s»؛ اگر یعنی train (ترین کردن مدل)، درست است"
+                % (before, after))
+    if last in ("تر", "تری"):
+        return "«%s»: اگر «تر» پسوند صفت است ← «%s»؛ اگر یعنی «خیس»، درست است" % (before, after)
+    if last in _AM_SUFFIXES and first.endswith("ه"):
+        return ("«%s»: «ه» در «%s» خوانده می‌شود (ساکن نیست)؛ احتمالاً «%s» درست است"
+                % (before, first, after))
+    if first == "می":
+        return ("«%s»: اگر «می» پیشوند فعل است ← «%s»؛ اگر ماه «می» (May) است، درست است"
+                % (before, after))
+    return "«%s»: شاید «%s» درست باشد" % (before, after)
+
+
 def lint(blocks, opts=None):
     """همه‌ی بررسی‌ها. خروجی: {"cues", "duration", "issues": [...], "counts": {code: n}}."""
     o = dict(DEFAULTS)
@@ -406,6 +579,12 @@ def lint(blocks, opts=None):
     file_digits = {"fa": 0, "ascii": 0, "arabic": 0}
     for b in blocks:
         lno = b["linenos"][0] if b["linenos"] else b["tline"]
+        tm = TIMING_RE.match(b.get("traw") or "")
+        if tm and re.search(r"[^\x00-\x7f]", tm.group(0)):
+            fixed_t = _ascii_timing(tm.group(0), "." if "." in tm.group(0) else ",")
+            issues.append(_issue("timing-digits", b, "«%s»: زمان‌ها باید با رقم انگلیسی باشند؛ یوتیوب و بیشتر "
+                                 "پخش‌کننده‌ها رقم فارسی را در زمان‌بندی نمی‌خوانند" % tm.group(0).strip(),
+                                 b["tline"], fixed_t.strip()))
         if b["start"] is None or b["end"] is None or b["end"] < b["start"]:
             issues.append(_issue("bad-time", b, "زمان شروع یا پایان خوانده نمی‌شود یا پایان قبل از شروع است",
                                  b["tline"]))
@@ -450,22 +629,30 @@ def lint(blocks, opts=None):
             if not text:
                 continue
             n = visible_len(text)
-            if n > o["max_chars"]:
+            if b["tline"] is None:
+                # JSON (Whisper) has no line breaks: only check that the segment fits in max_lines lines
+                cap = o["max_chars"] * o["max_lines"]
+                if n > cap:
+                    issues.append(_issue("capacity", b, "%s نویسه؛ در %s خط %s نویسه‌ای جا نمی‌شود: «%s»"
+                                         % (fan(n), fan(o["max_lines"]), fan(o["max_chars"]), text), lno))
+            elif n > o["max_chars"]:
                 issues.append(_issue("line-long", b, "%s نویسه (حداکثر %s): «%s»" % (fan(n), fan(o["max_chars"]), text),
                                      ln if ln is not None else lno))
             _, found = fix_line(raw_line)
+            unsafe = any(f[0] == "fix-unsafe" for f in found)
+            where_ln = ln if ln is not None else lno
             for code, before, after in found:
                 if code == "zwnj-maybe":
-                    if before.endswith(" ها"):
-                        msg = ("«%s»: اگر «ها» نشانه‌ی جمع است ← «%s»؛ اگر «ها»ی تأکید است («مواظب باش ها!») "
-                               "درست است" % (before, after))
-                    else:
-                        msg = ("«%s»: اگر «تر» پسوند صفت است ← «%s»؛ اگر یعنی «خیس»، درست است" % (before, after))
-                    issues.append(_issue(code, b, msg, ln if ln is not None else lno, after))
+                    issues.append(_issue(code, b, _maybe_msg(before, after), where_ln, after))
+                elif code == "fix-unsafe":
+                    issues.append(_issue(code, b, "«%s»: اصلاح خودکار این خط امن نبود و --fix از آن رد می‌شود؛ "
+                                         "ایرادهای بالا را دستی درست کن" % before, where_ln))
                 elif code in CODE_FA:
-                    issues.append(_issue(code, b, "«%s» ← «%s»" % (before, after),
-                                         ln if ln is not None else lno, after))
-            if fa.script_ratio(text) >= 0.5 and re.match(r"[A-Za-z0-9]", text):
+                    it = _issue(code, b, "«%s» ← «%s»" % (before, after), where_ln, after)
+                    if unsafe:
+                        it["fixable"] = False
+                    issues.append(it)
+            if fa.script_ratio(text) >= 0.5 and re.match(r"[A-Za-z0-9]", text) and not _rtl_marked(raw_line):
                 issues.append(_issue("rtl-start", b, "«%s»: در بعضی پخش‌کننده‌ها نشانه‌ها سمت اشتباه می‌افتند؛ "
                                      "خط را با کلمه‌ی فارسی شروع کن یا --fix --rlm" % text,
                                      ln if ln is not None else lno))
@@ -489,17 +676,30 @@ def lint(blocks, opts=None):
 
 # ---------------------------------------------------------------- --fix
 
-def apply_fixes(raw, blocks, digits=None, rlm=False):
-    """متن کامل فایل را با اصلاح‌های بی‌خطر برمی‌گرداند. فقط خط‌های متن زیرنویس دست می‌خورند؛
-    شماره‌ها، زمان‌ها، سربرگ WEBVTT و پایان خط‌ها (CRLF) همان می‌مانند.
-    خروجی: (متن جدید، فهرست تغییرها [(شماره‌ی خط، code، قبل، بعد)])."""
+def apply_fixes(raw, blocks, digits=None, rlm=False, kind="srt"):
+    """متن کامل فایل را با اصلاح‌های بی‌خطر برمی‌گرداند. خط‌های متن زیرنویس اصلاح می‌شوند و در خط
+    زمان‌بندی فقط رقم فارسی ← انگلیسی (جداکننده‌ی «٫» ← «,» در SRT و «.» در VTT)؛ شماره‌ها، سربرگ
+    WEBVTT، تنظیم‌های cue و پایان خط‌ها (CRLF) همان می‌مانند.
+    خروجی: (متن جدید، فهرست تغییرها [(شماره‌ی خط، code، قبل، بعد)]). خطی که اصلاحش امن نبود با code
+    «skipped» در فهرست می‌آید و دست نمی‌خورد."""
     bom = raw.startswith("﻿")
     body = raw[1:] if bom else raw
     lines = body.splitlines(True)
     changes = []
     textlines = set()
+    sep = "." if kind == "vtt" else ","
     for b in blocks:
         textlines.update(b["linenos"])
+        ti = b.get("tline")
+        if ti is None or ti >= len(lines):
+            continue
+        tline = lines[ti]
+        content = tline.rstrip("\r\n")
+        m = TIMING_RE.match(content)
+        if m and re.search(r"[^\x00-\x7f]", m.group(0)):
+            new_part = _ascii_timing(m.group(0), sep)
+            lines[ti] = new_part + tline[m.end():]
+            changes.append((ti + 1, "timing-digits", m.group(0).strip(), new_part.strip()))
     for i in sorted(textlines):
         if i >= len(lines):
             continue
@@ -507,11 +707,15 @@ def apply_fixes(raw, blocks, digits=None, rlm=False):
         content = line.rstrip("\r\n")
         ending = line[len(content):]
         new, found = fix_line(content, digits=digits, rlm=rlm)
+        if any(f[0] == "fix-unsafe" for f in found):
+            changes.append((i + 1, "skipped", content.strip(), content.strip()))
+            continue
         if new != content:
             lines[i] = new + ending
             for code, before, after in found:
                 if code != "zwnj-maybe":
                     changes.append((i + 1, code, before, after))
+    changes.sort(key=lambda c: c[0])
     return ("﻿" if bom else "") + "".join(lines), changes
 
 
@@ -523,7 +727,7 @@ def default_out(path):
 # ---------------------------------------------------------------- --unsure
 
 def unsure_items(blocks):
-    """کلمه‌های لاتین و عددها برای فهرست «شنیده → نوشته»، به ترتیب اولین بار.
+    """کلمه‌های لاتین و عددها برای فهرست «شنیده ← نوشته»، به ترتیب اولین بار.
     هر مورد: {"kind": "latin"|"number", "written", "first", "count", "cue"}."""
     items, order = {}, []
 
@@ -572,7 +776,7 @@ def spelling_choices(blocks):
 
 def render_unsure(name, blocks):
     items = unsure_items(blocks)
-    out = ["فهرست «شنیده → نوشته»: %s" % name, "",
+    out = ["فهرست «شنیده ← نوشته»: %s" % name, "",
            "ستون «شنیده» را از روی صدا پر کن (همان چیزی که گوینده واقعاً گفت)، بعد کل فهرست را برای سازنده "
            "بفرست و تا «اوکی» نگرفتی زیرنویس را نهایی نکن.", ""]
     if items:
@@ -633,19 +837,29 @@ def render_report(name, result, kind):
         for code in CODE_FA:
             if code in result["counts"]:
                 out.append("  %s: %s" % (CODE_FA[code], fan(result["counts"][code])))
-    out += ["", "قبل از آپلود: python3 -I fasubs.py <فایل> --unsure و تأیید فهرست «شنیده → نوشته» توسط سازنده."]
+    out += ["", "قبل از آپلود: python3 -I fasubs.py <فایل> --unsure و تأیید فهرست «شنیده ← نوشته» توسط سازنده."]
     return "\n".join(out)
 
 
 def render_changes(name, out_name, changes, remaining):
-    out = ["اصلاح بی‌خطر: %s ← %s" % (name, out_name), "%s تغییر (هیچ کلمه‌ای عوض نشده):" % fan(len(changes))]
-    for lno, code, before, after in changes:
-        label = {"digits": "یکدست کردن رقم", "rlm": "نشانه‌ی RLM اول خط"}.get(code, CODE_FA.get(code, code))
+    applied = [c for c in changes if c[1] != "skipped"]
+    skipped = [c for c in changes if c[1] == "skipped"]
+    out = ["اصلاح بی‌خطر روی %s؛ فایل اصلاح‌شده: %s" % (name, out_name),
+           "%s تغییر (هیچ کلمه‌ای عوض نشده):" % fan(len(applied))]
+    labels = {"digits": "یکدست کردن رقم", "rlm": "نشانه‌ی RLM اول خط"}
+    for lno, code, before, after in applied:
+        label = labels.get(code, CODE_FA.get(code, code))
         out.append("  خط %s · %s: «%s» ← «%s»" % (fan(lno), label, before, after))
-    if not changes:
+    if not applied:
         out.append("  چیزی برای اصلاح خودکار نبود.")
-    left = [i for i in remaining["issues"] if not i["fixable"]]
-    out += ["", "%s مورد مانده که باید دستی دیده شود (python3 -I fasubs.py %s)." % (fan(len(left)), out_name)]
+    if skipped:
+        out += ["", "%s خط دست نخورد چون اصلاح خودکارش امن نبود؛ دستی درستش کن:" % fan(len(skipped))]
+        for lno, _, before, _ in skipped:
+            out.append("  خط %s: «%s»" % (fan(lno), before))
+    errors = sum(1 for i in remaining["issues"] if i["level"] == "error")
+    warns = sum(1 for i in remaining["issues"] if i["level"] == "warn")
+    out += ["", "%s خطا و %s هشدار مانده که باید دستی دیده شود (python3 -I fasubs.py %s)."
+            % (fan(errors), fan(warns), out_name)]
     return "\n".join(out)
 
 
@@ -657,7 +871,7 @@ _NUM_OPTS = {"--fps": "fps", "--max-chars": "max_chars", "--max-lines": "max_lin
 
 def parse_args(argv):
     a = {"file": None, "fix": False, "out": None, "unsure": False, "json": False, "digits": None,
-         "rlm": False, "opts": {}}
+         "rlm": False, "force": False, "opts": {}}
     i = 0
     while i < len(argv):
         arg = argv[i]
@@ -666,7 +880,7 @@ def parse_args(argv):
             arg, val = arg.split("=", 1)
         if arg in ("-h", "--help"):
             raise SystemExit(0)
-        if arg in ("--fix", "--unsure", "--json", "--rlm"):
+        if arg in ("--fix", "--unsure", "--json", "--rlm", "--force"):
             a[arg[2:]] = True
         elif arg in _NUM_OPTS or arg in ("--out", "--digits"):
             if val is None:
@@ -694,8 +908,8 @@ def parse_args(argv):
         i += 1
     if a["file"] is None:
         raise UsageError("فایل زیرنویس را بده (SRT، VTT یا JSON ویسپر)")
-    if (a["digits"] or a["rlm"] or a["out"]) and not a["fix"]:
-        raise UsageError("--digits، --rlm و --out فقط همراه --fix معنی دارند")
+    if (a["digits"] or a["rlm"] or a["out"] or a["force"]) and not a["fix"]:
+        raise UsageError("--digits، --rlm، --out و --force فقط همراه --fix معنی دارند")
     return a
 
 
@@ -713,11 +927,16 @@ def main(argv=None):
     path = a["file"]
     name = os.path.basename(path)
     try:
-        blocks, raw, kind = load_blocks(path)
+        blocks, raw, kind, enc = load_blocks(path, with_encoding=True)
     except OSError as e:
         reason = "پیدا نشد" if isinstance(e, FileNotFoundError) else (e.strerror or str(e))
         print("fasubs.py: فایل خوانده نشد (%s): %s" % (reason, name), file=sys.stderr)
         return 2
+    except ValueError as e:
+        print("fasubs.py: %s: %s" % (name, e), file=sys.stderr)
+        return 2
+    if enc != "utf-8":
+        print("fasubs.py: فایل با %s خوانده شد؛ خروجی --fix به UTF-8 است." % enc, file=sys.stderr)
     if not blocks:
         print("fasubs.py: هیچ زیرنویسی در %s پیدا نشد (SRT، VTT یا JSON ویسپر؟)" % name, file=sys.stderr)
         return 2
@@ -730,22 +949,40 @@ def main(argv=None):
         if os.path.abspath(out_path) == os.path.abspath(path):
             print("fasubs.py: فایل اصلی بازنویسی نمی‌شود؛ با --out یک اسم دیگر بده.", file=sys.stderr)
             return 2
-        new_raw, changes = apply_fixes(raw, blocks, digits=a["digits"], rlm=a["rlm"])
+        new_raw, changes = apply_fixes(raw, blocks, digits=a["digits"], rlm=a["rlm"], kind=kind)
+        if new_raw.count("\ufffd") > raw.count("\ufffd"):
+            # last guard: never write a file whose letters were replaced by «�»
+            print("fasubs.py: خروجی نویسه‌ی خراب (�) دارد که در فایل اصلی نبود؛ چیزی نوشته نشد.", file=sys.stderr)
+            return 2
+        new_bytes = new_raw.encode("utf-8")
+        if os.path.exists(out_path) and not a["force"]:
+            try:
+                with open(out_path, "rb") as fh:
+                    same = fh.read() == new_bytes
+            except OSError:
+                same = False
+            if not same:
+                print("fasubs.py: %s از قبل هست (شاید دستی اصلاحش کرده‌ای)؛ با --force بازنویسی کن یا "
+                      "--out اسم دیگری بده." % os.path.basename(out_path), file=sys.stderr)
+                return 2
         try:
-            with open(out_path, "w", encoding="utf-8", newline="") as fh:
-                fh.write(new_raw)
+            with open(out_path, "wb") as fh:
+                fh.write(new_bytes)
         except OSError as e:
             print("fasubs.py: نوشتن فایل نشد: %s" % (e.strerror or e), file=sys.stderr)
             return 2
         remaining = lint(parse_blocks(new_raw), a["opts"])
+        n_err = sum(1 for i in remaining["issues"] if i["level"] == "error")
+        n_warn = sum(1 for i in remaining["issues"] if i["level"] == "warn")
         if a["json"]:
-            print(json.dumps({"out": os.path.basename(out_path),
+            print(json.dumps({"out": os.path.basename(out_path), "encoding": enc,
                               "changes": [{"line": l, "code": c, "before": b, "after": t}
                                           for l, c, b, t in changes],
+                              "errors": n_err, "warnings": n_warn,
                               "remaining": remaining}, ensure_ascii=False, indent=2))
         else:
             print(render_changes(name, os.path.basename(out_path), changes, remaining))
-        return 0
+        return 1 if n_err else 0
 
     if a["unsure"]:
         if a["json"]:

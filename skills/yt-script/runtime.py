@@ -105,7 +105,13 @@ def number_to_words_fa(s):
 _BRACKETS = re.compile(r"\[[^\]]*\]")
 _SCREEN = re.compile(r"\[\s*(روی صفحه|رو صفحه|روی اسکرین|on screen|b-roll|بی‌رول)\s*[:：]", re.I)
 _HEADING = re.compile(r"^\s*(#{1,6}\s+(.*)|\*\*(.+?)\*\*\s*:?\s*)$")
-_NUMTOK = re.compile(r"[-−]?[0-9۰-۹٠-٩]+(?:[.,٫٬/:][0-9۰-۹٠-٩]+)*")
+# a leading hyphen is a minus sign only when no letter or digit comes right before it
+# (GPT-5 and ۲۰-۳۰ are a name and a range, not «منفی پنج» / «منفی سی»; «-3 درجه» is still negative)
+_NUMTOK = re.compile(r"(?:(?<![\w۰-۹٠-٩])[-−])?[0-9۰-۹٠-٩]+(?:[.,٫٬/:][0-9۰-۹٠-٩]+)*")
+_D = "0-9۰-۹٠-٩"
+# a range like ۲۰-۳۰ or 2–3 (not part of a date like ۱۴۰۳-۰۸-۲۰): read as «بیست تا سی»
+_RANGE = re.compile(r"(?<![%s.,٫٬/:\-–−])([%s]+(?:[.,٫٬][%s]+)?)\s*[-–]\s*([%s]+(?:[.,٫٬][%s]+)?)"
+                    r"(?![%s]|[.,٫٬/:][%s]|\s*[-–]\s*[%s])" % ((_D,) * 8))
 
 
 def parse_beats(raw):
@@ -190,7 +196,20 @@ def tts_issues(text):
     """Lines a clone/TTS voice is likely to misread. Each: (kind, found, suggestion)."""
     out = []
     t = fa.normalize(text)  # harakat are kept on purpose
+    # Latin names (GPT-4o, GPT-5) get their own line below that says to spell the whole name in
+    # Persian, so the digits inside them need no separate «عدد» line.
+    latin_spans = [m.span() for m in _LATIN.finditer(t)]
+    covered = []
+    for m in _RANGE.finditer(t):
+        if any(a <= m.start() < b for a, b in latin_spans):
+            continue
+        lo, hi = number_to_words_fa(m.group(1)), number_to_words_fa(m.group(2))
+        if lo and hi:
+            out.append(("بازه", m.group(0), "%s تا %s" % (lo, hi)))
+            covered.append(m.span())
     for m in _NUMTOK.finditer(t):
+        if any(a <= m.start() < b for a, b in latin_spans + covered):
+            continue
         tok = m.group(0)
         w = number_to_words_fa(tok)
         if w:
