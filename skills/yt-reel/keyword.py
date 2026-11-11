@@ -72,6 +72,34 @@ FINGLISH = {
 ONSETS = {"pr", "pl", "br", "bl", "tr", "dr", "kr", "kl", "gr", "gl", "fr", "fl", "sk", "sp",
           "st", "sm", "sn", "sl", "sw"}
 
+# words that turn up in everyday comments anyway («سلام، عالی بود»، «link?»): a keyword like these
+# sends the DM to almost everyone who comments, asked or not
+COMMON_WORDS = frozenset(fa.fold(w) for w in """
+شروع سلام مرسی ممنون ممنونم عالی آره بله باشه لینک خوب خیلی هوش لایک اوکی قشنگ دمت گرم مرسیی
+start link yes hi hello thanks thank ok okay good nice wow cool love ai info please more
+""".split())
+
+
+def common_words(keyword, also=()):
+    """کلمه‌ی کامنت (یا یکی از --also ها) که خودش یک کلمه‌ی خیلی رایج است؛ فهرست شکل نمایشی."""
+    out = []
+    for w in [keyword] + list(also):
+        d = _display(w)
+        if d and fa.fold(re.sub(r"\s+", "", d)) in COMMON_WORDS and d not in out:
+            out.append(d)
+    return out
+
+
+def common_warning(words):
+    if not words:
+        return None
+    names = "، ".join("«%s»" % w for w in words)
+    head = ("%s کلمه‌ی خیلی رایجی است" % names) if len(words) == 1 else ("%s کلمه‌های خیلی رایجی‌اند" % names)
+    it = "آن" if len(words) == 1 else "یکی از آن‌ها"
+    return ("هشدار: %s؛ هر کامنتی که %s را داشته باشد، حتی کامنت معمولی‌ای که آموزش را نخواسته، دایرکت را "
+            "راه می‌اندازد. یک کلمه‌ی نامعمول (مثل «آرتیفکت») یا دوتکه (مثل «دهه ۶۰») انتخاب کن." % (head, it))
+
+
 LABEL = {
     "orig": "شکل اصلی",
     "madda": "آ ← ا",
@@ -681,6 +709,8 @@ def main(argv=None):
         return 2
     shown = items[:a.max]
     tests = [(t, matches(pattern, t)) for t in a.test]
+    common = common_words(a.keyword, a.also)
+    warning = common_warning(common)
 
     if a.json:
         out = {
@@ -693,6 +723,8 @@ def main(argv=None):
             "regex_flavor": "python, javascript (ES2018+), pcre",
             "regex_mode": "exact" if a.exact else "contains",
             "tests": [{"comment": t, "match": m} for t, m in tests],
+            "common_word": common,
+            "warning": warning,
             "note": "امتیازها تخمینی‌اند (قاعده‌ی سرانگشتی)، نه شمارش واقعی کامنت‌ها.",
         }
         print(json.dumps(out, ensure_ascii=False, indent=2))
@@ -700,6 +732,8 @@ def main(argv=None):
 
     if a.regex:
         print(pattern)
+        if warning:
+            print(warning, file=sys.stderr)
         print("حساس به حروف بزرگ/کوچک نباشد (فلگ i)؛ در پایتون و جاوااسکریپت یکسان کار می‌کند. "
               + ("فقط وقتی می‌گیرد که کل کامنت همین کلمه باشد." if a.exact
                  else "هر کامنتی که این کلمه را داشته باشد می‌گیرد."), file=sys.stderr)
@@ -708,6 +742,8 @@ def main(argv=None):
         return 0
 
     print("کلمه‌ی کامنت: «%s»" % items[0][0])
+    if warning:
+        print(warning)
     print("%s شکل ساخته شد؛ %s تای محتمل‌تر:" % (fa.to_fa_digits(str(len(items))),
                                               fa.to_fa_digits(str(len(shown)))))
     print()

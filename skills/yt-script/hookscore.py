@@ -10,6 +10,7 @@
     python3 -I hookscore.py hooks.txt            # هر خط یه هوک، مرتب از قوی به ضعیف
     python3 -I hookscore.py --hook "یه خط"       # نمره‌ی یه هوک
     python3 -I hookscore.py --json hooks.txt     # خروجی ماشینی (JSON)
+    python3 -I hookscore.py - < hooks.txt        # «-» یعنی هوک‌ها رو از ورودی استاندارد (stdin) بخون
 
 ویژگی‌ها: دقت (عدد، اسم، تاریخ، واحد)، خطاب (تو/شما و فعل‌ها و ضمیرهای خطاب)، ریسک (چی رو از دست
 می‌ده)، کنجکاوی (سؤال باز)، کوتاهی (تعداد کلمه؛ فارسی ۸ تا ۲۲ کلمه، انگلیسی ۹ تا ۲۴).
@@ -539,7 +540,13 @@ def main():
         print("hookscore: آرگومان اضافه: %s" % " ".join(extra), file=sys.stderr)
         print(__doc__, file=sys.stderr)
         sys.exit(2)
-    if "--hook" not in a and a:
+    if "--hook" not in a and a and a[0] == "-":
+        try:
+            lines = sys.stdin.buffer.read().decode("utf-8-sig").splitlines()
+        except (OSError, UnicodeDecodeError) as e:
+            print("hookscore: ورودی استاندارد (stdin) خونده نشد؛ باید UTF-8 باشه (%s)" % e, file=sys.stderr)
+            sys.exit(2)
+    elif "--hook" not in a and a:
         if os.path.isdir(a[0]):
             print("hookscore: این یه پوشه‌ست، نه فایل: %s" % a[0], file=sys.stderr)
             sys.exit(2)

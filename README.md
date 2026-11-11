@@ -60,6 +60,18 @@ cp -r youtube-skills-farsi/skills/yt-* ~/.claude/skills/
 </div>
 
 ```
+/plugin install youtube-farsi --marketplace mounesi/youtube-skills-farsi
+```
+
+</div>
+
+<div dir="rtl">
+
+در نسخه‌های قدیمی‌تر Claude Code (پیش از 2.1.275) همین کار در دو قدم انجام می‌شود:
+
+</div>
+
+```
 /plugin marketplace add mounesi/youtube-skills-farsi
 /plugin install youtube-farsi
 ```

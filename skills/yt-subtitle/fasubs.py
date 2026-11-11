@@ -98,6 +98,11 @@ TAR_SURE = frozenset("""بزرگ کوچک بیش کم بد خوب سریع را�
 # «ها» after these is an interjection («آ ها»)
 HA_SKIP = frozenset(["آ", "ا", "اه", "آه", "اوه"])
 
+# kashida / tatweel (U+0640) inside a word, e.g. «مهـــم»: fine burned into a reel, but in an uploaded
+# SRT the word no longer matches a search for «مهم». Only a warning: --fix leaves it (it can be a style)
+TATWEEL = "\u0640"
+_KASHIDA_WORD = re.compile(WCH + "*" + TATWEEL + WCH + "*")
+
 TIMING_RE = re.compile(r"^\s*(\d[\d:.,٫]*)\s*-->\s*(\d[\d:.,٫]*)")
 # a line meant as timing but broken («00:00:03,500 -> 00:00:05,000»، end time missing)
 LOOSE_TIME_RE = re.compile(r"^\s*\d[\d:.,٫]*\s*(?:-{1,3}>|[–—]>|→)")
@@ -137,12 +142,14 @@ CODE_FA = {
     "digit-mix": "رقم فارسی و انگلیسی با هم",
     "rtl-start": "خط فارسی که با لاتین یا رقم شروع می‌شود",
     "fix-unsafe": "اصلاح خودکار امن نبود",
+    "kashida": "کشیده (ـ) در متن",
 }
 LEVEL_OF = {"bad-time": "error", "timing-digits": "error", "empty": "error", "overlap": "error",
             "order": "error", "arabic-letter": "error", "arabic-digit": "warn", "zwnj": "warn",
             "zwnj-maybe": "warn", "punct": "warn", "line-long": "warn", "capacity": "warn", "lines": "warn",
             "cps": "warn", "short": "warn", "long": "warn", "gap": "warn", "digit-mix": "warn",
-            "rtl-start": "warn", "fix-unsafe": "warn"}
+            "rtl-start": "warn", "fix-unsafe": "warn",
+            "kashida": "warn"}
 FIXABLE = frozenset(["arabic-letter", "arabic-digit", "zwnj", "punct", "timing-digits"])
 
 
@@ -652,6 +659,16 @@ def lint(blocks, opts=None):
                     if unsafe:
                         it["fixable"] = False
                     issues.append(it)
+            if TATWEEL in text:
+                words = []
+                for w in _KASHIDA_WORD.findall(text):
+                    if w not in words:
+                        words.append(w)
+                issues.append(_issue("kashida", b, "%s: در فایلی که آپلود می‌شود جست‌وجوی زیرنویس را خراب "
+                                     "می‌کند (با جست‌وجوی «%s» پیدا نمی‌شود)؛ اگر سبک عمدیِ زیرنویس سوزانده "
+                                     "روی ویدیو نیست، دستی پاکش کن (--fix به آن دست نمی‌زند)"
+                                     % ("، ".join("«%s»" % w for w in words), words[0].replace(TATWEEL, "")),
+                                     where_ln))
             if fa.script_ratio(text) >= 0.5 and re.match(r"[A-Za-z0-9]", text) and not _rtl_marked(raw_line):
                 issues.append(_issue("rtl-start", b, "«%s»: در بعضی پخش‌کننده‌ها نشانه‌ها سمت اشتباه می‌افتند؛ "
                                      "خط را با کلمه‌ی فارسی شروع کن یا --fix --rlm" % text,

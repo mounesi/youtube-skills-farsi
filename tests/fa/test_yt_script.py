@@ -309,6 +309,24 @@ class HookscoreCliTest(unittest.TestCase):
             self.assertIn("آرگومان اضافه", r.stderr)
             self.assertEqual(r.stdout, "")
 
+    def test_stdin_dash(self):
+        text = "\ufeff" + STRONG_FA + "\r\n" + WEAK_FA + "\n"
+        r = subprocess.run([sys.executable, "-I", HOOKSCORE, "--json", "-"], input=text.encode("utf-8"),
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(r.returncode, 0, r.stderr.decode("utf-8"))
+        hooks = [x["hook"] for x in json.loads(r.stdout.decode("utf-8"))]
+        self.assertEqual(len(hooks), 2)
+        self.assertEqual(hooks[0], fa.normalize(STRONG_FA))
+        r = subprocess.run([sys.executable, "-I", HOOKSCORE, "-"], input=b"", stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("هیچ هوکی", r.stderr.decode("utf-8"))
+        r = subprocess.run([sys.executable, "-I", HOOKSCORE, "-"], input=b"\xff\xfe bad",
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(r.returncode, 2)
+        self.assertNotIn(b"Traceback", r.stderr)
+        self.assertIn("stdin", run(HOOKSCORE, "--help").stdout)
+
     def test_paragraph_line_warns(self):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "long.txt")
@@ -443,6 +461,8 @@ class PortabilityTest(unittest.TestCase):
         self.assertIn("منتشرش کنیم یا تغییرش بدیم؟", md)
         self.assertIn("voice.md", md)
         self.assertIn("--tts", md)
+        self.assertIn("فینگلیش", md)  # hooks are scored in Persian script, not Finglish
+        self.assertIn("hookscore.py - < hooks.txt", md)
         self.assertNotRegex(md, "[يك]")
         self.assertNotIn("/Users/", md)
 

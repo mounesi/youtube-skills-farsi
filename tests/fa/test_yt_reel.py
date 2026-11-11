@@ -199,6 +199,31 @@ class TestCLI(unittest.TestCase):
         for v in ("آرتیفکت", "ارتیفکت", "ارتیفکیت", "اردیفکت"):
             self.assertTrue(re.search(lines[0], v, re.I), v)
 
+    def test_common_word_warning(self):
+        for word in ("شروع", "سلام", "مرسی", "عالی", "آره", "اره", "لینک", "ممنون", "خوب", "هوش",
+                     "Start", "link", "YES", "«سلام»"):
+            self.assertTrue(kw.common_words(word), word)
+        for word in ("آرتیفکت", "دهه ۶۰", "هوش مصنوعی", "شروع ریلز", "artifact"):
+            self.assertEqual(kw.common_words(word), [], word)
+        self.assertEqual(kw.common_words("آرتیفکت", ["link"]), ["link"])  # --also is checked too
+        r = run("شروع")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("هشدار", r.stdout)
+        self.assertIn("دوتکه", r.stdout)
+        r = run("start", "--regex")
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(len(r.stdout.strip().splitlines()), 1)  # stdout stays one regex
+        self.assertIn("رایج", r.stderr)
+        d = json.loads(run("مرسی", "--json").stdout)
+        self.assertEqual(d["common_word"], ["مرسی"])
+        self.assertIn("نامعمول", d["warning"])
+        d = json.loads(run("آرتیفکت", "--json").stdout)
+        self.assertEqual(d["common_word"], [])
+        self.assertIsNone(d["warning"])
+        self.assertNotIn("هشدار", run("آرتیفکت").stdout)
+        with open(os.path.join(SKILL, "SKILL.md"), encoding="utf-8") as fh:
+            self.assertIn("کلمه‌ی خیلی رایج", fh.read())
+
     def test_bad_input(self):
         self.assertEqual(run("").returncode, 2)
         self.assertEqual(run("x", "--max", "0").returncode, 2)

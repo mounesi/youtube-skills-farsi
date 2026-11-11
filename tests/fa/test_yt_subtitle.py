@@ -326,6 +326,28 @@ class TestCLI(unittest.TestCase):
         blocks, _, _ = fs.load_blocks(out)
         self.assertFalse([i for i in fs.lint(blocks)["issues"] if i["fixable"]])
 
+    def test_kashida_warned_but_not_fixed(self):
+        line = "این نکته خیلی مهـــم است"
+        raw = srt(("00:00:00,000", "00:00:03,000", line), ("00:00:03,000", "00:00:06,000", "مهم نیست"))
+        r = lint_text(raw)
+        hits = [i for i in r["issues"] if i["code"] == "kashida"]
+        self.assertEqual([i["cue"] for i in hits], [1])  # plain «مهم» in cue 2 is fine
+        self.assertEqual(hits[0]["level"], "warn")
+        self.assertFalse(hits[0]["fixable"])
+        self.assertIn("«مهـــم»", hits[0]["msg"])
+        self.assertIn("جست‌وجو", hits[0]["msg"])
+        src = os.path.join(self.tmp, "k.srt")
+        with open(src, "w", encoding="utf-8") as fh:
+            fh.write(raw)
+        out = os.path.join(self.tmp, "k.fixed.srt")
+        p = run(src, "--fix", "--out", out)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+        with open(out, encoding="utf-8") as fh:
+            self.assertIn(line, fh.read())  # --fix leaves the kashida: it can be a deliberate style
+        p = run(src)
+        self.assertIn("کشیده", p.stdout)
+
     def test_fix_keeps_bom_and_crlf(self):
         out = os.path.join(self.tmp, "c.srt")
         p = run(fx("crlf_bom_fa.srt"), "--fix", "--out", out)
@@ -632,6 +654,7 @@ class TestSkillDoc(unittest.TestCase):
             doc = fh.read()
         self.assertTrue(doc.startswith("---\nname: yt-subtitle\n"))
         self.assertIn("شنیده → نوشته", doc)
+        self.assertIn("کشیده (ـ)", doc)  # kashida is a warning, not a --fix
         self.assertIn("## دروازه", doc)
         self.assertTrue(doc.rstrip().endswith("**منتشرش کنیم یا تغییرش بدیم؟**"))
         self.assertIn("description: >-", doc)
