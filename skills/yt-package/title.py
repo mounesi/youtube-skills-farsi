@@ -12,7 +12,7 @@ Length: YouTube truncates around 60 characters on desktop search and around 40 o
 feed. Both limits are reported because they are different failures - a desktop truncation loses the
 tail, a mobile one can lose the subject.
 """
-import json, re, sys, os
+import argparse, json, re, sys, os
 
 DESKTOP, MOBILE, HARD = 60, 40, 100
 VAGUE = {"amazing","incredible","insane","crazy","huge","massive","ultimate","best","powerful",
@@ -20,26 +20,47 @@ VAGUE = {"amazing","incredible","insane","crazy","huge","massive","ultimate","be
 STOP = {"the","a","an","of","for","to","in","on","and","or","is","are","with","your","you","my","i",
         "this","that","it","how","what","why"}
 
+MONTHS = {"january","february","march","april","may","june","july","august","september","october",
+          "november","december","jan","feb","apr","jun","jul","aug","sep","sept","oct","nov","dec"}
+WEEKDAYS = {"monday","tuesday","wednesday","thursday","friday","saturday","sunday"}
+# "may" and "march" are also everyday words; count them as dates only when capitalised
+AMBIGUOUS_DATES = {"may","march"}
+
 def words(t): return re.findall(r"[a-z0-9']+", t.lower())
 
+def date_words(t):
+    found = []
+    for w in re.findall(r"[A-Za-z]+", t):
+        lw = w.lower()
+        if lw in WEEKDAYS or lw in MONTHS:
+            if lw in AMBIGUOUS_DATES and not w[0].isupper():
+                continue
+            found.append(w)
+    return found
+
 def check(title, thumb=None):
-    t = title.strip()
+    t = title.lstrip("\ufeff").strip()
     n = len(t)
     issues, good = [], []
     if n > HARD: issues.append(("length", f"{n} characters - YouTube's hard limit is {HARD}"))
     elif n > DESKTOP: issues.append(("length", f"{n} characters - desktop search cuts near {DESKTOP}"))
     else: good.append(f"{n} characters, inside the {DESKTOP}-character desktop cut")
     if n > MOBILE:
-        head = t[:MOBILE].rsplit(" ", 1)[0]
+        cut = t[:MOBILE + 1]  # one extra char keeps a word that ends exactly at the cut
+        head = (cut.rsplit(" ", 1)[0] if " " in cut else t[:MOBILE]).rstrip()
         issues.append(("mobile", f'a mobile feed shows about "{head}..." - check the subject survives'))
     caps = [w for w in t.split() if len(w) > 2 and w.isupper()]
     if len(caps) > 2: issues.append(("shouting", f"{len(caps)} all-caps words - two is the ceiling before it reads as spam"))
     elif caps: good.append(f"{len(caps)} all-caps word for emphasis")
-    v = [w for w in words(t) if w in VAGUE]
-    if v: issues.append(("vague", f"{', '.join(sorted(set(v)))} - swap for a number, a name or a date"))
+    # both tokenizations, so "mind-blowing" matches "mindblowing" and "best-ever" still matches "best"
+    v = sorted({w for w in words(t) + words(t.replace("-", "")) if w in VAGUE})
+    if v: issues.append(("vague", f"{', '.join(v)} - swap for a number, a name or a date"))
     nums = re.findall(r"\d[\d,.]*%?", t)
+    dates = date_words(t)
     if nums: good.append(f"carries a concrete figure ({', '.join(nums[:3])})")
-    else: issues.append(("no-number", "no number, date or name - the most reliable single fix"))
+    elif dates: good.append(f"carries a concrete date ({', '.join(dates[:3])})")
+    else: issues.append(("no-number", "no number or date found - add a figure, a date or a specific name "
+                                      "(names are not detected, check by hand)"))
     if t.endswith("?"): good.append("open question in the title")
     front = [w for w in words(t)[:3] if w not in STOP]
     if not front: issues.append(("front-load", "the first three words are all filler - move the subject forward"))
@@ -51,8 +72,9 @@ def check(title, thumb=None):
                                         "the thumbnail should say what the title does not"))
         else:
             good.append("thumbnail and title carry different words")
-        if len(words(thumb)) > 4:
-            issues.append(("thumb-length", f"{len(words(thumb))} words on the thumbnail - three is the ceiling at feed size"))
+        nthumb = len(words(thumb))
+        if nthumb > 3:
+            issues.append(("thumb-length", f"{nthumb} words on the thumbnail - three is the ceiling at feed size"))
     score = max(0, min(100, 100 - 14 * len(issues) + 4 * len(good)))
     return {"title": t, "chars": n, "score": score, "issues": issues, "good": good}
 
@@ -63,13 +85,21 @@ def show(r):
     for m in r["good"]:      print(f"    ok              {m}")
 
 def main():
-    a = sys.argv[1:]
-    as_json = "--json" in a; a = [x for x in a if x != "--json"]
-    thumb = a[a.index("--thumb") + 1] if "--thumb" in a else None
-    if "--title" in a:
-        rows = [check(a[a.index("--title") + 1], thumb)]
-    elif a and os.path.exists(a[0]):
-        rows = [check(l, thumb) for l in open(a[0]).read().splitlines() if l.strip()]
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("file", nargs="?", help="text file with one title per line")
+    p.add_argument("--title", help="a single title to lint")
+    p.add_argument("--thumb", help="the thumbnail text paired with the title(s)")
+    p.add_argument("--json", action="store_true", help="print JSON instead of a report")
+    args = p.parse_args()
+    as_json, thumb = args.json, args.thumb
+    if args.title is not None:
+        rows = [check(args.title, thumb)]
+    elif args.file and os.path.isfile(args.file):
+        with open(args.file, encoding="utf-8-sig") as f:
+            lines = f.read().splitlines()
+        rows = [check(l, thumb) for l in lines if l.strip()]
+    elif args.file and not os.path.exists(args.file):
+        print(f"title.py: file not found: {args.file}", file=sys.stderr); sys.exit(1)
     else:
         print(__doc__); sys.exit(1)
     rows.sort(key=lambda r: -r["score"])

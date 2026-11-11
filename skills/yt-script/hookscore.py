@@ -28,7 +28,25 @@ YOU = re.compile(r"\b(you|your|you're|youre|yourself)\b", re.I)
 STAKE = re.compile(r"\b(lose|lost|wasting|waste|quit|fail|broke|cost|risk|before|stop|never|die|dying|dead)\b", re.I)
 CURIOSITY = re.compile(r"\b(why|how|what|which|until|before|but|nobody|almost|except|reason|actually)\b", re.I)
 
-def words(t): return re.findall(r"[a-z0-9'%$.]+", t.lower())
+def words(t):
+    # dots stay inside numbers ("1.5", "$2.50") but a full stop or ellipsis is not part of a word
+    return [w for w in (x.strip(".") for x in re.findall(r"[a-z0-9'%$.]+", t.lower())) if w]
+
+I_FORMS = {"I", "I'm", "I've", "I'll", "I'd"}
+
+def _ends_sentence(tok):
+    return tok.rstrip("\"')\u201d\u2019").endswith((".", "!", "?"))
+
+def _named_things(t):
+    toks = t.split()
+    n = 0
+    for prev, x in zip(toks, toks[1:]):
+        c = x.strip("\"'(\u201c\u2018")
+        if not c[:1].isupper(): continue
+        if c.rstrip(".,!?;:\"')") in I_FORMS: continue
+        if _ends_sentence(prev): continue
+        n += 1
+    return n
 
 def specificity(t):
     w = words(t)
@@ -38,7 +56,8 @@ def specificity(t):
     filler = sum(1 for x in w if x in FILLER)
     s = 34 + nums * 22 - vague * 16 - filler * 5
     # proper nouns that are not sentence-initial read as named things
-    s += min(18, 6 * sum(1 for x in t.split()[1:] if x[:1].isupper()))
+    # (the pronoun "I" and the first word after a full stop are not named things)
+    s += min(18, 6 * _named_things(t))
     return max(0, min(100, s))
 
 def address(t):
@@ -106,12 +125,21 @@ def main():
     a = sys.argv[1:]
     as_json = "--json" in a
     a = [x for x in a if x != "--json"]
+    if a and a[0] in ("-h", "--help"):
+        print(__doc__); sys.exit(0)
     if "--hook" in a:
-        lines = [a[a.index("--hook") + 1]]
-    elif a and os.path.exists(a[0]):
-        lines = [l for l in open(a[0]).read().splitlines() if l.strip()]
+        i = a.index("--hook")
+        if i + 1 >= len(a) or not a[i + 1].strip():
+            print("hookscore: --hook needs a line of text", file=sys.stderr)
+            print(__doc__, file=sys.stderr); sys.exit(2)
+        lines = [a[i + 1].strip()]
+    elif a:
+        if not os.path.isfile(a[0]):
+            print(f"hookscore: no such file: {a[0]}", file=sys.stderr); sys.exit(2)
+        with open(a[0], encoding="utf-8-sig") as f:
+            lines = [l.strip() for l in f.read().splitlines() if l.strip()]
     else:
-        print(__doc__); sys.exit(1 if not a else 0)
+        print(__doc__, file=sys.stderr); sys.exit(1)
     out = []
     for t in lines:
         parts, verdict, name, hits = score(t)

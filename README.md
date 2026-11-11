@@ -44,7 +44,7 @@ rest works.
 
 Then spend ten minutes on [`templates/voice.md`](templates/voice.md). Copy it to
 `~/.claude/youtube/voice.md` and fill it in, or send Claude three of your own videos and say "write
-my voice.md from these". Every skill reads that file. It matters more here than anywhere else,
+my voice.md from these". The writing skills (script, package, comment, shorts, seo, plan) read that file. It matters more here than anywhere else,
 because you have to say the words out loud.
 
 ## The eleven

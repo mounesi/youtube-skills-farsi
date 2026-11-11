@@ -13,8 +13,12 @@ The retention graph is the only honest feedback YouTube gives you. Almost nobody
 
 ```bash
 python3 retention.py retention.csv --duration 600
-python3 retention.py retention.csv --transcript transcript.srt
+python3 retention.py retention.csv --duration 600 --transcript transcript.srt
 ```
+
+Pass `--duration SECONDS` whenever the export's x-axis is a percentage (most Studio exports):
+without it the tool cannot turn a percent position into a time, so it cannot line the drops up
+with the `--transcript` cues.
 
 Getting the file: Studio -> a video -> Analytics -> Engagement -> the audience-retention chart ->
 the download icon -> "Audience retention".

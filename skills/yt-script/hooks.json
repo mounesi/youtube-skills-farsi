@@ -30,7 +30,7 @@
    "match": [
     "\\bthis (channel|guy|creator|account)\\b",
     "\\bwent from .* to\\b",
-    "\\bin (a|one|two|three|\\d+) (week|month|year)s?\\b"
+    "\\bin (a|\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty|ninety|a hundred|hundred|a thousand|thousand) (day|week|month|year)s?\\b"
    ]
   },
   {
@@ -42,7 +42,9 @@
    "match": [
     "\\byou('re| are) (probably |still )?(doing|making)\\b",
     "\\bthe (mistake|reason) (everyone|most people|nobody)\\b",
-    "\\bstop (doing )?\\b"
+    "\\bstop (doing )?\\b",
+    "\\b(is|are) (the reason |why )(nobody|no one|people|viewers|you)\\b",
+    "\\bit('s| is) not (the|your)\\b"
    ]
   },
   {
@@ -77,7 +79,8 @@
    "fails_when": "Superlatives are cheap. Earn it by naming what it beat.",
    "match": [
     "\\bthe (best|worst|fastest|easiest|only)\\b",
-    "\\bnumber one\\b"
+    "\\bnumber one\\b",
+    "\\b(best|worst|fastest|easiest|quickest|simplest|cheapest) way\\b"
    ]
   },
   {
@@ -87,9 +90,10 @@
    "example": "In the next six minutes you will have a working title, thumbnail and script for your next video.",
    "fails_when": "The clock has to be true. Overrun it and the next video's hook is not believed.",
    "match": [
-    "\\bin (the next )?\\d+ (seconds|minutes|hours)\\b",
+    "\\b(in|within) (the next )?(\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty|ninety|a hundred|hundred|a thousand|thousand) (seconds|minutes|hours)\\b",
     "\\bby the end of this video\\b",
-    "\\bunder \\d+\\b"
+    "\\bunder (\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty|ninety|a hundred|hundred|a thousand|thousand) (seconds|minutes|hours)\\b",
+    "\\byou('ll| will) have\\b"
    ]
   },
   {
@@ -100,7 +104,7 @@
    "fails_when": "Needs a real cost - time, money, risk - or there is no stake.",
    "match": [
     "\\bI (tried|spent|tested|let|gave)\\b",
-    "\\bfor \\d+ (days|weeks|months)\\b",
+    "\\bfor (\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty|ninety|a hundred|hundred|a thousand|thousand) (days|weeks|months)\\b",
     "\\bso you don'?t have to\\b"
    ]
   },
@@ -111,7 +115,8 @@
    "example": "Why do your videos die at 30 seconds when the topic is fine?",
    "fails_when": "Must be the viewer's question, not yours. Pull it from your own comments.",
    "match": [
-    "^(why|how|what|when|should|can|do|does|is)\\b",
+    "^(why|how|what|when|should|can|is)\\b",
+    "^(do|does)\\b(?!\\s+not\\b)",
     "\\?\\s*$"
    ]
   },
@@ -124,7 +129,8 @@
    "match": [
     "\\bbefore\\b.*\\bafter\\b",
     "\\bthis was\\b.*\\bthis is\\b",
-    "\\bused to\\b"
+    "\\bused to\\b",
+    "\\bsame (video|title|thumbnail|channel|script)\\b"
    ]
   },
   {
@@ -149,7 +155,8 @@
    "match": [
     "\\b\\w+ (plus|\\+) \\w+\\b",
     "\\bcombine\\b",
-    "\\btogether\\b"
+    "\\btogether\\b",
+    "\\b(plus|\\+)\\b.*\\b(gives?|makes?|equals?)\\b"
    ]
   },
   {
@@ -162,7 +169,8 @@
     "\\bdo not\\b",
     "\\bdon'?t (upload|post|publish|start)\\b",
     "\\bbefore you\\b",
-    "\\bstop\\b"
+    "\\bstop\\b",
+    "\\buntil you\\b"
    ]
   },
   {
@@ -172,8 +180,8 @@
    "example": "Seven things I would do differently if I started a channel in 2026.",
    "fails_when": "The count must be exact and every item must be different in kind.",
    "match": [
-    "^\\d+ \\w+",
-    "\\b(here are|these are) \\d+\\b"
+    "^(\\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|fifty|a hundred|hundred) \\w+",
+    "\\b(here are|these are) (\\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|fifty|a hundred|hundred)\\b"
    ]
   },
   {
@@ -183,10 +191,12 @@
    "example": "This is the analytics page. This video did 40% of the channel's watch time. Here is why.",
    "fails_when": "Requires a real screenshot. A described receipt is not a receipt.",
    "match": [
-    "\\bthis is (the|my)\\b",
+    "\\bthis is (the|my) (analytics|dashboard|stats|revenue|earnings|data|proof|screenshot|numbers?|results?)\\b",
     "\\bscreenshot\\b",
     "\\bproof\\b",
-    "\\breceipts?\\b"
+    "\\breceipts?\\b",
+    "\\b(analytics|dashboard|earnings|revenue) (page|screen|report|tab)\\b",
+    "\\bthis (video|post|one) (did|made|earned|got)\\b"
    ]
   },
   {
@@ -224,7 +234,8 @@
     "\\bvs\\.?\\b",
     "\\bversus\\b",
     "\\bwhich (one )?(is|wins)\\b",
-    "\\bsame .* (three|two) ways\\b"
+    "\\bsame .* (three|two) ways\\b",
+    "\\b(one of them|the other (one|two|three))\\b"
    ]
   },
   {
@@ -236,7 +247,8 @@
    "match": [
     "\\bevery (video|post) .* starts\\b",
     "\\bit all (starts|started)\\b",
-    "\\bthe (real )?reason\\b"
+    "\\bthe (real )?reason\\b",
+    "\\b(starts?|started|begins?) (in|with|from) (the same|one|a single)\\b"
    ]
   },
   {
@@ -249,7 +261,8 @@
     "\\b(this|next) (week|month|year)\\b",
     "\\bis changing\\b",
     "\\bno longer\\b",
-    "\\bas of\\b"
+    "\\bas of\\b",
+    "\\bstops? (mattering|working|counting)\\b"
    ]
   },
   {
@@ -261,7 +274,8 @@
    "match": [
     "^if you\\b",
     "\\bfor (anyone|everyone|people) who\\b",
-    "\\byou specifically\\b"
+    "\\byou specifically\\b",
+    "\\bif you (have|are|run|make|own|started)\\b"
    ]
   }
  ]
